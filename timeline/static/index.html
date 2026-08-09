@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video hành trình một người</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Video hành trình một người</h1>
+  <nav id="steps">
+    <button data-step="1" class="on">1. Chọn người</button>
+    <button data-step="2" disabled>2. Ảnh tự chọn</button>
+    <button data-step="3" disabled>3. Tinh chỉnh</button>
+    <button data-step="4" disabled>4. Dựng video</button>
+  </nav>
+  <div id="health" class="muted"></div>
+  <div id="progress"></div>
+</header>
+
+<main>
+
+<!-- ===================================================== 1. chọn người -->
+<section id="s1" class="step on">
+  <div class="bar">
+    <label>Tối thiểu <input id="minReady" type="number" value="10" min="1" max="9999"> ảnh đã xử lý</label>
+    <button id="reload">Tải lại</button>
+    <span id="peopleCount" class="muted"></span>
+  </div>
+  <p class="muted">Immich thường tách <b>một người</b> thành <b>nhiều cụm</b> ở
+    các mốc tuổi khác nhau. Bấm chọn tất cả các cụm của cùng một người, rồi
+    dùng "Tìm cụm cùng người" để lan rộng dần.</p>
+  <div id="people" class="grid people"></div>
+
+  <div id="simBox" class="hide">
+    <div class="bar">
+      <h3 id="simHead">Cụm có vẻ cùng người này</h3>
+      <button id="pickAllSug">Chọn tất cả gợi ý</button>
+      <button id="hideSug">Đóng</button>
+    </div>
+    <div id="simNote" class="muted"></div>
+    <div class="warn">Người thân có nét giống nhau vẫn đạt 43–45%, nên đừng tin
+      con số một mình — nhìn ảnh rồi hãy chọn. Cụm gắn nhãn
+      <b>đã có tên khác</b> gần như chắc chắn là người khác, đã bị đẩy xuống cuối.</div>
+    <div id="simList" class="grid people"></div>
+  </div>
+
+  <!-- Thanh nay phai nam TRONG section s1: no position:fixed, de ngoai thi
+       .step{display:none} khong che duoc va no noi tren ca 4 buoc. -->
+  <div id="pickBar" class="pickbar hide">
+    <div class="pi">
+      <div id="pickInfo"></div>
+      <div id="pickNames" class="muted"></div>
+    </div>
+    <label class="muted">Giống nhau ≥ <output id="o_minSim"></output>
+      <input type="range" id="minSim" min="0.15" max="0.8" step="0.05" value="0.3">
+    </label>
+    <button id="findSim">Tìm cụm cùng người</button>
+    <button id="clearPick">Bỏ chọn</button>
+    <button id="mkProject" class="primary">Lấy ảnh →</button>
+  </div>
+</section>
+
+<!-- ===================================================== 2. ảnh tự chọn -->
+<section id="s2" class="step">
+  <div id="projHead"></div>
+  <div class="cards">
+    <div class="card"><b id="n_candidate">0</b><span>ảnh của người này</span></div>
+    <div class="card"><b id="n_pass">0</b><span>đạt ngưỡng pose</span></div>
+    <div class="card ok"><b id="n_selected">0</b><span>vào video</span></div>
+    <div class="card"><b id="n_years">0</b><span>năm được phủ</span></div>
+  </div>
+  <h3>Phân bố theo năm</h3>
+  <div id="chart" class="chart"></div>
+  <div id="gaps"></div>
+  <div class="bar"><button id="toStep3" class="primary">Tinh chỉnh pose →</button></div>
+</section>
+
+<!-- ===================================================== 3. tinh chỉnh -->
+<section id="s3" class="step">
+  <div class="split">
+    <aside id="filters">
+      <h3>Pose đầu</h3>
+      <label>Quay đầu tối đa <output id="o_max_yaw"></output>°
+        <input type="range" id="f_max_yaw" min="5" max="60" step="1"></label>
+      <label>Ngửa/cúi tối đa <output id="o_max_pitch"></output>°
+        <input type="range" id="f_max_pitch" min="5" max="50" step="1"></label>
+      <label>Nghiêng đầu tối đa <output id="o_max_roll"></output>°
+        <input type="range" id="f_max_roll" min="5" max="60" step="1"></label>
+      <label>Độ chính diện tối thiểu <output id="o_min_frontality"></output>
+        <input type="range" id="f_min_frontality" min="0" max="1" step="0.05"></label>
+      <label>Ngưỡng mắt mở (EAR) <output id="o_min_ear"></output>
+        <input type="range" id="f_min_ear" min="0" max="0.35" step="0.01"></label>
+
+      <h3>Chất lượng ảnh</h3>
+      <label>Mặt tối thiểu <output id="o_min_eye_ratio"></output> cạnh ảnh
+        <input type="range" id="f_min_eye_ratio" min="0" max="0.15" step="0.005"></label>
+      <label>Độ nét tối thiểu <output id="o_min_sharp"></output>
+        <input type="range" id="f_min_sharp" min="0" max="400" step="10"></label>
+
+      <h3>Người khác trong ảnh</h3>
+      <label class="chk"><input type="checkbox" id="f_allow_others">
+        Chấp nhận ảnh có người khác</label>
+      <label>Số mặt tối đa trong ảnh (0 = không giới hạn)
+        <input type="number" id="f_max_faces" min="0" max="30" step="1"></label>
+
+      <h3>Tư thế cơ thể</h3>
+      <label class="chk"><input type="checkbox" id="f_use_body">
+        Dùng dữ liệu body pose</label>
+      <div id="bodyOpts">
+        <div class="chips" id="c_postures"></div>
+        <div class="chips" id="c_orientations"></div>
+        <label class="chk"><input type="checkbox" id="f_allow_missing_body">
+          Nhận cả ảnh không detect được thân</label>
+      </div>
+
+      <h3>Rải đều theo thời gian</h3>
+      <label>Mỗi <output id="o_bucket_days"></output> ngày lấy
+        <output id="o_per_bucket"></output> ảnh
+        <input type="range" id="f_bucket_days" min="7" max="365" step="1">
+        <input type="range" id="f_per_bucket" min="1" max="6" step="1"></label>
+
+      <div class="bar">
+        <button id="apply" class="primary">Áp dụng</button>
+        <button id="resetF">Mặc định</button>
+      </div>
+      <div id="applying" class="muted"></div>
+    </aside>
+
+    <div id="results">
+      <div class="cards small">
+        <div class="card ok"><b id="r_selected">0</b><span>vào video</span></div>
+        <div class="card"><b id="r_rejected">0</b><span>bị loại</span></div>
+      </div>
+      <div id="reasons"></div>
+      <div class="tabs">
+        <button data-tab="sel" class="on">Ảnh vào video</button>
+        <button data-tab="rej">Ảnh bị loại</button>
+      </div>
+      <p class="muted" id="tabHint"></p>
+      <div id="gridSel" class="grid frames"></div>
+      <div id="gridRej" class="grid frames hide"></div>
+      <div class="bar"><button id="toStep4" class="primary">Dựng video →</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 4. dựng video -->
+<section id="s4" class="step">
+  <div class="split">
+    <aside>
+      <h3>Khung hình</h3>
+      <label>Tỉ lệ khung
+        <select id="r_aspect">
+          <option value="4:3" selected>4:3 ngang</option>
+          <option value="3:2">3:2 ngang</option>
+          <option value="16:9">16:9 ngang</option>
+          <option value="1:1">1:1 vuông</option>
+          <option value="3:4">3:4 dọc</option>
+          <option value="9:16">9:16 dọc (điện thoại)</option>
+        </select></label>
+      <label>Cạnh dài
+        <select id="r_size">
+          <option value="720">720</option>
+          <option value="900" selected>900</option>
+          <option value="1080">1080</option>
+          <option value="1440">1440</option>
+        </select></label>
+      <label>Khuôn mặt to <output id="o_face_frac"></output> chiều ngang khung
+        <input type="range" id="r_face_frac" min="0.05" max="0.6" step="0.01"
+               value="0.12"></label>
+      <p class="muted">Nhỏ thì thấy cả người và bối cảnh, lớn thì thành chân
+        dung sát mặt. Khuôn mặt chỉ là điểm neo cho video khỏi nhảy.</p>
+      <label>Vị trí mắt theo chiều dọc <output id="o_eye_y"></output>
+        <input type="range" id="r_eye_y" min="0.15" max="0.75" step="0.01"
+               value="0.33"></label>
+      <p class="muted">Kéo xuống thì thấy nhiều phần trên đầu, kéo lên thì
+        thấy nhiều thân người hơn.</p>
+      <label>Phần thiếu của khung
+        <select id="r_fill">
+          <option value="crop" selected>Phóng vừa đủ, cắt bớt rìa</option>
+          <option value="blur">Giữ trọn ảnh, nền mờ</option>
+        </select></label>
+      <label class="chk"><input type="checkbox" id="r_level" checked>
+        Xoay cho hai mắt nằm ngang</label>
+
+      <h3>Thông số video</h3>
+      <label>Ảnh mỗi giây <output id="o_fps"></output>
+        <input type="range" id="r_fps" min="1" max="24" step="1" value="6"></label>
+      <label>Làm mượt
+        <select id="r_smooth">
+          <option value="blend" selected>Pha trộn (mượt)</option>
+          <option value="none">Không (cắt cứng)</option>
+        </select></label>
+      <label>Nhãn thời gian
+        <select id="r_label">
+          <option value="year" selected>Năm</option>
+          <option value="month">Năm-tháng</option>
+          <option value="date">Ngày đầy đủ</option>
+          <option value="none">Không</option>
+        </select></label>
+      <div class="bar">
+        <button id="render" class="primary">Dựng video</button>
+      </div>
+      <p class="muted" id="renderEst"></p>
+    </aside>
+    <div>
+      <h3>Xem trước khung — đúng như video sẽ ra</h3>
+      <p class="muted">Ba ảnh cách xa nhau về thời gian. Khuôn mặt phải nằm
+        cùng một chỗ ở cả ba, phần còn lại là bối cảnh bạn giữ được.</p>
+      <div id="framePreview" class="fprev"></div>
+      <div id="renderState"></div>
+      <video id="player" controls class="hide"></video>
+      <h3>Lần dựng trước</h3>
+      <div id="renderList"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

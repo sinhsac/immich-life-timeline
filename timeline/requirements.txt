@@ -1,0 +1,10 @@
+# Service khong load model ML nao -> khong can onnxruntime / insightface.
+fastapi==0.115.5
+# Chi can khi lay anh qua IMMICH_URL + IMMICH_API_KEY thay vi mount volume.
+requests==2.32.3
+uvicorn[standard]==0.32.1
+psycopg[binary,pool]==3.2.3
+pydantic==2.10.3
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+python-multipart==0.0.19

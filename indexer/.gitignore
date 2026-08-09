@@ -1,0 +1,6 @@
+.env
+models/
+__pycache__/
+*.pyc
+*.onnx
+*.pt

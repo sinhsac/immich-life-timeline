@@ -1,0 +1,12 @@
+# Pin chinh xac de build lai cho ket qua giong nhau.
+psycopg[binary]==3.2.3
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+onnxruntime==1.19.2
+insightface==0.7.3
+requests==2.32.3
+
+# insightface keo theo scikit-image/scipy. Ghim de khong bi lech phien ban.
+scikit-image==0.24.0
+scipy==1.13.1
+Cython==3.0.11

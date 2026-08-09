@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+
+# cau hinh va bi mat
+.env
+
+# Toan bo execute/ KHONG len repo public. Trong do la cong cu deploy rieng cho
+# mot may cu the: kubeconfig (quyen admin cluster), IP noi bo, ten user, va
+# script co duong dan tuyet doi. Khong ai khac dung duoc, va de lo ra thi
+# thanh ban do ha tang cua may nha.
+execute/
+
+.vscode/
+
+# model va du lieu chay
+models/
+work/
+*.onnx
+*.pt
+*.mp4
+
+# code cu, giu tam de doi chieu
+_backup/

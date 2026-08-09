@@ -1,0 +1,109 @@
+# Deploy len k3s cung node voi Immich (Immich chay bang docker compose).
+#
+#   kubectl create ns media
+#   kubectl -n media create secret generic immich-db --from-literal=password='...'
+#   kubectl apply -f deploy/k3s.yaml
+#
+# Model va anh vao qua hostPath vi Immich khong chay trong k3s.
+# SUA hai duong dan HOST_MODEL_DIR / HOST_UPLOAD_DIR cho dung may cua ban.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fp-indexer-env
+  namespace: media
+data:
+  PG_HOST: "127.0.0.1"           # postgres cua Immich publish tren host
+  PG_PORT: "5432"
+  PG_DATABASE: "immich"
+  PG_USER: "postgres"
+  PG_SCHEMA: "public"
+  TABLE_PREFIX: "fp_"
+  MEDIA_ROOT: "/immich-upload"
+  MODEL_DIR: "/models"
+  FACE_MODEL: "buffalo_l"
+  BODY_MODEL: "yolov8n-pose.onnx"
+  BODY_IMGSZ: "640"
+  BODY_CONF: "0.35"
+  USE_GPU: "0"
+  # 8GB RAM / i5 dung chung voi Immich: giu 2 thread va nghi nhe moi anh.
+  ONNX_THREADS: "2"
+  BATCH_COMMIT: "200"
+  MAX_SIDE: "1600"
+  SLEEP_MS: "40"
+  LIMIT: "0"
+  COPY_EMBEDDING: "1"
+---
+# Chay tay mot lan:  kubectl -n media create job --from=cronjob/fp-indexer fp-run-1
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fp-indexer
+  namespace: media
+spec:
+  schedule: "0 2 * * *"          # 2h sang moi ngay, luc may ranh
+  concurrencyPolicy: Forbid      # khong bao gio chay hai job cung luc
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # 6 tieng, du cho lan scan dau tien vai chuc nghin anh
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # Chay chung network voi host de goi postgres qua 127.0.0.1
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
+          securityContext:
+            runAsUser: 10001
+            runAsGroup: 10001
+          terminationGracePeriodSeconds: 120
+          containers:
+            - name: indexer
+              # Image do GitHub Actions build san, k3s pull truc tiep.
+              # Doi 'latest' sang tag sha neu muon ghim ban cu the.
+              image: ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
+              imagePullPolicy: Always
+              args: ["--stage", "all"]
+              envFrom:
+                - configMapRef:
+                    name: fp-indexer-env
+              env:
+                - name: PG_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-db
+                      key: password
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "700Mi"
+                limits:
+                  # Chan tran de khong day Immich vao OOM tren may 8GB.
+                  cpu: "2"
+                  memory: "2Gi"
+              volumeMounts:
+                - name: models
+                  mountPath: /models
+                  readOnly: true
+                - name: upload
+                  mountPath: /immich-upload
+                  readOnly: true
+                - name: cache
+                  mountPath: /tmp/fp-cache
+          volumes:
+            - name: models
+              hostPath:
+                path: /srv/fp-models          # <-- HOST_MODEL_DIR
+                type: Directory
+            - name: upload
+              hostPath:
+                path: /srv/immich/upload      # <-- HOST_UPLOAD_DIR
+                type: Directory
+            - name: cache
+              emptyDir:
+                sizeLimit: 512Mi

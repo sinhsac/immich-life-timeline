@@ -1,0 +1,135 @@
+# Service thuong tru tren k3s, cung node voi Immich.
+#
+#   kubectl -n media create secret generic fp-timeline \
+#       --from-literal=pg-password='...' \
+#       --from-literal=api-token="$(python -c 'import secrets;print(secrets.token_urlsafe(32))')"
+#   kubectl apply -f deploy/k3s.yaml
+#
+# SUA hai hostPath cho dung may ban: thu muc upload cua Immich va thu muc work.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fp-timeline-env
+  namespace: media
+data:
+  PG_HOST: "127.0.0.1"
+  PG_PORT: "5432"
+  PG_DATABASE: "immich"
+  PG_USER: "postgres"
+  PG_SCHEMA: "public"
+  TABLE_PREFIX: "fp_"
+  PG_POOL_MAX: "4"
+  MEDIA_ROOT: "/immich-upload"
+  WORK_DIR: "/work"
+  FFMPEG_THREADS: "2"
+  MAX_FRAMES: "1200"
+  THUMB_SIZE: "160"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fp-timeline-work
+  namespace: media
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path        # k3s co san local-path-provisioner
+  resources:
+    requests:
+      storage: 8Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fp-timeline
+  namespace: media
+spec:
+  replicas: 1                  # render la stateful theo thread, khong scale
+  strategy:
+    type: Recreate             # tranh hai pod cung ghi vao PVC
+  selector:
+    matchLabels: {app: fp-timeline}
+  template:
+    metadata:
+      labels: {app: fp-timeline}
+    spec:
+      hostNetwork: true        # goi postgres cua Immich qua 127.0.0.1
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: web
+          # Image do GitHub Actions build san, k3s pull truc tiep.
+          image: ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef: {name: fp-timeline-env}
+          env:
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: fp-timeline, key: pg-password}
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: fp-timeline, key: api-token}
+          resources:
+            requests: {cpu: "200m", memory: "300Mi"}
+            # Chan tran de khong day Immich vao OOM tren may 8GB.
+            limits:   {cpu: "2",    memory: "1200Mi"}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 4
+          volumeMounts:
+            - {name: upload, mountPath: /immich-upload, readOnly: true}
+            - {name: work,   mountPath: /work}
+      volumes:
+        - name: upload
+          hostPath:
+            path: /srv/immich/upload      # <-- SUA cho dung may ban
+            type: Directory
+        - name: work
+          persistentVolumeClaim: {claimName: fp-timeline-work}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fp-timeline
+  namespace: media
+spec:
+  selector: {app: fp-timeline}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+# Ingress: chi bat khi ban that su can truy cap tu ngoai.
+# Service co API_TOKEN nhung van nen dat sau TLS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fp-timeline
+  namespace: media
+  annotations:
+    # video co the vai chuc MB
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: timeline.local            # <-- SUA
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fp-timeline
+                port: {number: 8080}

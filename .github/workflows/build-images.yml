@@ -1,0 +1,82 @@
+# Build hai image roi day len GHCR, de may dich chi viec pull.
+#
+# Vi sao lam o day thay vi build tren may dich: may dich la OptiPlex 3010,
+# 4 core, mang WiFi hay Read timeout giua khi pip tai wheel. Rieng insightface
+# phai compile tu source (khong co wheel) nen build tai cho mat 15-20 phut va
+# hay that bai. Runner cua GitHub lam viec do trong vai phut.
+#
+# Ket qua:
+#   ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
+#   ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
+# kem tag theo commit sha va theo git tag.
+
+name: build images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "indexer/**"
+      - "timeline/**"
+      - ".github/workflows/build-images.yml"
+  # Cho phep bam chay tay tu tab Actions
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write        # can de push len GHCR bang GITHUB_TOKEN
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # timeline that bai thi indexer van build tiep
+      matrix:
+        include:
+          - name: fp-indexer
+            dir: indexer
+          - name: fp-timeline
+            dir: timeline
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN co san, khong phai tao secret gi
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.dir }}
+          file: ${{ matrix.dir }}/deploy/Dockerfile
+          # May dich la x86_64. Khong build arm de khoi phai chay QEMU (rat cham).
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache rieng theo tung image, neu khong hai job se dap cache cua nhau.
+          # Nho cache nay ma lan build sau khong phai compile lai insightface.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: tom tat
+        run: |
+          echo "### ${{ matrix.name }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
