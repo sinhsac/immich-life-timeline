@@ -260,3 +260,42 @@ token.
 Toàn bộ qua biến môi trường. Xem [`indexer/README.md`](indexer/README.md) và
 [`timeline/README.md`](timeline/README.md) cho danh sách đầy đủ, các ngưỡng lọc,
 và API reference. UI cũng có OpenAPI ở `/api/docs`.
+
+## License
+
+[PolyForm Noncommercial License 1.0.0](LICENSE.md) — miễn phí cho mọi mục đích
+**phi thương mại**.
+
+**Được phép:** dùng cho cá nhân và gia đình, học tập, nghiên cứu, dự án sở thích;
+tải về sửa đổi thoải mái; phân phối lại bản đã sửa; dùng trong trường học, tổ
+chức từ thiện, viện nghiên cứu công, cơ quan nhà nước.
+
+**Không được phép:** bán, cho thuê, tính phí, dùng trong sản phẩm hay dịch vụ
+thương mại, hoặc bất cứ việc gì nhằm mục đích kinh doanh.
+
+Điều kiện phi thương mại **áp dụng cả cho bản sửa đổi**: license này chỉ cấp
+quyền cho mục đích phi thương mại, nên ai nhận lại từ bạn cũng chỉ có đúng quyền
+đó — không ai có thể fork rồi đổi sang giấy phép cho phép bán.
+
+Muốn dùng thương mại thì mở một issue để trao đổi.
+
+### Ba điều nên biết trước khi fork
+
+**Đây không phải open source theo định nghĩa OSI.** Các giấy phép giới hạn phi
+thương mại không được OSI phê duyệt, và GitHub sẽ hiện là "Other" thay vì tên
+license. Ai chỉ nhận giấy phép OSI sẽ không dùng được project này. Đó là cái giá
+của điều kiện phi thương mại, không phải nhược điểm có thể sửa.
+
+**Vì sao PolyForm mà không phải CC BY-NC-SA.** Chính Creative Commons
+[khuyến nghị không dùng giấy phép CC cho phần mềm](https://creativecommons.org/faq/#can-i-apply-a-creative-commons-license-to-software):
+chúng không cấp quyền bằng sáng chế và không xử lý chuyện phân phối mã nguồn hay
+bản biên dịch. PolyForm do các luật sư về giấy phép soạn riêng cho phần mềm, có
+điều khoản bằng sáng chế, và viết bằng ngôn ngữ dễ đọc.
+
+**Không có điều khoản ShareAlike.** License này ràng buộc *mục đích sử dụng*, chứ
+không buộc công khai mã nguồn. Ai đó có thể sửa riêng mà không chia sẻ lại, miễn
+là phi thương mại. Nếu bạn cần buộc họ công khai thay đổi thì license này không
+làm được điều đó.
+
+*Nội dung mục này diễn giải lại từ các nguồn được dẫn link, không phải văn bản
+pháp lý. Bản có hiệu lực là [LICENSE.md](LICENSE.md).*
