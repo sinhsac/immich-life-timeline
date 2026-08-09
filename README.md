@@ -127,9 +127,22 @@ ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
 ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
 ```
 
-GitHub Actions build mỗi lần push vào `main`, kèm tag `sha-<commit>` để ghim bản
-cụ thể. Nếu bạn fork, nhớ đổi package sang **public** ở Packages → Package
-settings, vì GHCR để private kể cả với repo public.
+Các tag có sẵn:
+
+| Tag | Nghĩa |
+|---|---|
+| `latest` | build mới nhất trên `main` |
+| `1.2.3` | phiên bản release, **nên dùng cho máy chạy thật** |
+| `v1.2.3` | cùng bản đó, giữ nguyên chữ `v` |
+| `sha-<commit>` | ghim chính xác một commit |
+
+Dùng `latest` thì phải đặt `imagePullPolicy: Always`. Để `IfNotPresent` là node
+thấy đã có `latest` trong cache rồi dùng mãi, build mới không bao giờ tới máy —
+`latest` thành vô nghĩa. Ghim theo phiên bản thì ngược lại: `IfNotPresent` mới
+đúng, vì tag bất biến nên không cần hỏi registry mỗi lần khởi động.
+
+Nếu bạn fork, nhớ đổi package sang **public** ở Packages → Package settings, vì
+GHCR để private kể cả với repo public.
 
 Muốn tự build:
 

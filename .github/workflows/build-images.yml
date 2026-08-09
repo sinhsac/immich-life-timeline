@@ -15,10 +15,11 @@ name: build images
 on:
   push:
     branches: [main]
-    paths:
-      - "indexer/**"
-      - "timeline/**"
-      - ".github/workflows/build-images.yml"
+    # Tag v* de tao release. Khong dat 'paths' o day: mot key 'push' chi co mot
+    # bo filter, va path filter ap dung nham vao tag push se lam release im lang
+    # khong build gi. Build lai khi chi sua doc thi hoi thua, nhung cache gha
+    # lam no chi mat 1-2 phut — doi lay viec tag luon chay dung.
+    tags: ["v*"]
   # Cho phep bam chay tay tu tab Actions
   workflow_dispatch:
 
@@ -80,3 +81,63 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # Chi chay khi push tag v*. Tao GitHub Release sau khi CA HAI image build xong,
+  # de release khong bao gio tro toi image chua ton tai.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # can de tao release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # can full history de --generate-notes so sanh duoc
+
+      - name: tao release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          IMG: ghcr.io/${{ github.repository }}
+        run: |
+          V=${TAG#v}
+          cat > /tmp/notes.md <<EOF
+          ## Image
+
+          \`\`\`
+          $IMG/fp-indexer:$V
+          $IMG/fp-timeline:$V
+          \`\`\`
+
+          Hoac dung \`$TAG\`, \`latest\`, hay \`sha-${GITHUB_SHA}\` de ghim chinh xac.
+
+          ## Chay nhanh
+
+          \`\`\`bash
+          git clone --branch $TAG https://github.com/${GITHUB_REPOSITORY}.git
+          cd $(basename ${GITHUB_REPOSITORY})
+          cp .env.example .env      # sua PG_PASSWORD va UPLOAD_LOCATION
+          docker compose --profile setup up     # tai model, mot lan
+          docker compose run --rm indexer       # quet thu vien
+          docker compose up -d timeline         # http://localhost:8080
+          \`\`\`
+
+          Yeu cau: Immich da chay xong Facial Recognition, va truy cap duoc
+          Postgres cua Immich. Khong can GPU.
+
+          ## Tai lieu
+
+          - [README](https://github.com/${GITHUB_REPOSITORY}/blob/$TAG/README.md)
+          - [indexer](https://github.com/${GITHUB_REPOSITORY}/blob/$TAG/indexer/README.md)
+          - [timeline](https://github.com/${GITHUB_REPOSITORY}/blob/$TAG/timeline/README.md)
+          - [Toan bo commit](https://github.com/${GITHUB_REPOSITORY}/commits/$TAG)
+
+          Giay phep: PolyForm Noncommercial 1.0.0 — mien phi phi thuong mai.
+          EOF
+          # Khong dung --generate-notes cung luc voi --notes-file: mot so ban gh
+          # coi hai co nay la xung dot va lam buoc nay that bai.
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file /tmp/notes.md \
+            --verify-tag
