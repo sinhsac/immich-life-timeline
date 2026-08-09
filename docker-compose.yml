@@ -1,0 +1,147 @@
+# Chay bang Docker Compose, cho ai khong dung Kubernetes.
+#
+#   cp .env.example .env      # sua PG_PASSWORD va nguon anh
+#   docker compose --profile setup up        # tai model, chay mot lan
+#   docker compose up -d timeline            # mo http://localhost:8080
+#   docker compose run --rm indexer          # quet anh, chay lai duoc nhieu lan
+#
+# Image lay tu GHCR, khong phai build gi.
+
+name: immich-timeline
+
+x-pg: &pg
+  PG_HOST: ${PG_HOST:-host.docker.internal}
+  PG_PORT: ${PG_PORT:-5432}
+  PG_DATABASE: ${PG_DATABASE:-immich}
+  PG_USER: ${PG_USER:-postgres}
+  PG_PASSWORD: ${PG_PASSWORD:?can dat PG_PASSWORD trong .env}
+  PG_SCHEMA: ${PG_SCHEMA:-public}
+  TABLE_PREFIX: ${TABLE_PREFIX:-fp_}
+
+x-media: &media
+  # Chon MOT trong hai. De MEDIA_ROOT trong thi tu dong dung API.
+  MEDIA_ROOT: ${MEDIA_ROOT:-}
+  IMMICH_URL: ${IMMICH_URL:-}
+  IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+
+# Postgres cua Immich thuong chay o mot compose project khac. host-gateway cho
+# container goi ve Postgres dang listen tren host qua 'host.docker.internal'.
+# Neu Immich chay cung mot Docker network thi dat PG_HOST = ten container cua
+# no va bo phan extra_hosts di.
+x-host: &host
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  # ------------------------------------------------------------------ web UI
+  timeline:
+    image: ghcr.io/sinhsac/immich-plugin/fp-timeline:${TAG:-latest}
+    restart: unless-stopped
+    <<: *host
+    ports:
+      - "${TIMELINE_PORT:-8080}:8080"
+    environment:
+      <<: [*pg, *media]
+      WORK_DIR: /work
+      FFMPEG_THREADS: ${FFMPEG_THREADS:-2}
+      MAX_FRAMES: ${MAX_FRAMES:-1200}
+      # De trong = KHONG co xac thuc. Service nay xem duoc toan bo anh cua ban.
+      API_TOKEN: ${API_TOKEN:-}
+    volumes:
+      - work:/work
+      # Chi dung khi MEDIA_ROOT duoc dat. Doc thoi (:ro) — khong bao gio ghi
+      # vao thu muc anh cua Immich.
+      #
+      # Mac dinh /tmp chu khong phai /dev/null: Compose khong co cu phap mount
+      # co dieu kien, ma bind-mount mot char device vao duong dan thu muc thi
+      # container khong khoi dong duoc. Mount /tmp read-only la vo hai va bi bo
+      # qua hoan toan khi dung che do API.
+      - ${UPLOAD_LOCATION:-/tmp}:/immich-upload:ro
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+
+  # ---------------------------------------------------------------- job quet
+  # KHONG chay cung 'docker compose up' vi day la job mot lan, khong phai
+  # service thuong tru. Chay bang:  docker compose run --rm indexer
+  indexer:
+    image: ghcr.io/sinhsac/immich-plugin/fp-indexer:${TAG:-latest}
+    profiles: ["job"]
+    restart: "no"
+    <<: *host
+    environment:
+      <<: [*pg, *media]
+      MODEL_DIR: /models
+      INSIGHTFACE_HOME: /models
+      MPLCONFIGDIR: /tmp/matplotlib
+      FACE_MODEL: buffalo_l
+      BODY_MODEL: yolov8n-pose.onnx
+      ONNX_THREADS: ${ONNX_THREADS:-2}
+      BATCH_COMMIT: ${BATCH_COMMIT:-200}
+      MAX_SIDE: ${MAX_SIDE:-1600}
+      SLEEP_MS: ${SLEEP_MS:-40}
+    volumes:
+      - models:/models:ro
+      - ${UPLOAD_LOCATION:-/tmp}:/immich-upload:ro
+    # Chan tran de khong bop chet may khi chay chung voi Immich
+    deploy:
+      resources:
+        limits:
+          cpus: "${INDEXER_CPUS:-2}"
+          memory: ${INDEXER_MEMORY:-2g}
+
+  # ------------------------------------------------------- tai model mot lan
+  # profile 'setup' nen khong chay cung 'docker compose up'.
+  # user: root vi named volume tao ra thuoc root; file sinh ra la 644 nen
+  # indexer (uid 10001) van doc duoc.
+  models-face:
+    image: ghcr.io/sinhsac/immich-plugin/fp-indexer:${TAG:-latest}
+    profiles: ["setup"]
+    restart: "no"
+    user: "0:0"
+    environment:
+      INSIGHTFACE_HOME: /models
+    entrypoint: ["python", "tools/fetch_models.py", "--face", "--out", "/models"]
+    volumes:
+      - models:/models
+
+  # yolov8n-pose khong co san file .onnx nen phai export tu ultralytics.
+  # Ba chi tiet bat buoc, thieu mot cai la that bai:
+  #   libgl1        ultralytics keo theo opencv-python ban KHONG headless,
+  #                 thieu libGL.so.1 thi 'import ultralytics' nem ImportError
+  #                 ma fetch_models.py lai bat va in thong bao chung chung
+  #   torch CPU     ban mac dinh keo ca CUDA (~2.5GB), ban cpu chi ~200MB
+  #   HOME=/tmp     ultralytics va matplotlib can cho ghi cache
+  models-body:
+    image: python:3.11-slim
+    profiles: ["setup"]
+    restart: "no"
+    environment:
+      HOME: /tmp
+      YOLO_CONFIG_DIR: /tmp
+    working_dir: /tmp
+    volumes:
+      - models:/models
+      - ./indexer/tools:/tools:ro
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        if [ -f /models/yolov8n-pose.onnx ]; then
+          echo "da co yolov8n-pose.onnx, bo qua"; exit 0
+        fi
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends libgl1 libglib2.0-0
+        pip install -q --no-cache-dir torch \
+            --index-url https://download.pytorch.org/whl/cpu
+        pip install -q --no-cache-dir ultralytics onnx
+        python -c "import cv2, ultralytics; print('ultralytics', ultralytics.__version__)"
+        python /tools/fetch_models.py --body --out /models
+
+volumes:
+  models:
+  work:
