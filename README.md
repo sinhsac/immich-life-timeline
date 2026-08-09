@@ -1,5 +1,9 @@
 # Video hành trình một người, dựng từ thư viện Immich
 
+[![build images](https://github.com/sinhsac/immich-plugin/actions/workflows/build-images.yml/badge.svg)](https://github.com/sinhsac/immich-plugin/actions/workflows/build-images.yml)
+[![release](https://img.shields.io/github/v/release/sinhsac/immich-plugin?sort=semver)](https://github.com/sinhsac/immich-plugin/releases/latest)
+[![license: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE.md)
+
 Chọn một người trong thư viện ảnh [Immich](https://immich.app) của bạn, công cụ
 này lọc ra những khung hình hợp lý trải đều theo thời gian, neo khuôn mặt về
 cùng một vị trí rồi ghép thành video — xem lại như thấy người đó lớn dần qua
