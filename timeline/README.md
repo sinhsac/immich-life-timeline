@@ -1,11 +1,24 @@
 # fp-timeline — dựng video hành trình một người từ thư viện Immich
 
-Service web chạy thường trú trên k3s. Bốn bước:
+Service web chạy thường trú trên k3s.
+
+**Đường nhanh:** chọn người → bấm **Tạo video ngay**. Service tự suy ngưỡng lọc
+từ độ dày dữ liệu, chọn ảnh rải đều theo thời gian, rồi dựng video luôn.
+
+**Đường nâng cao** (nút *Tinh chỉnh từng bước*) giữ nguyên bốn bước:
 
 1. **Chọn cụm** — chọn nhiều cluster của cùng một người, có gợi ý lan rộng
-2. **Tự động lấy ảnh** — query dữ liệu job indexer đã index, rải đều theo thời gian
+2. **Tự động lấy ảnh** — rải đều theo thời gian, xem phân bố theo năm
 3. **Tinh chỉnh pose** — kéo ngưỡng, mỗi ảnh bị loại đều có lý do cụ thể
-4. **Dựng video** — align khuôn mặt rồi ffmpeg ghép thành mp4
+4. **Dựng video** — xem trước khung rồi ffmpeg ghép thành mp4
+
+Đường nhanh chỉ dừng lại ở bước 3 khi **không chọn đủ 2 ảnh** — ffmpeg cần tối
+thiểu 2 frame, nên thay vì render rồi báo lỗi khó hiểu, UI đưa bạn tới đúng chỗ
+nới ngưỡng kèm lý do.
+
+Tiến độ index nằm ở **trang Thống kê** riêng trên thanh nav. Trước đây khối đó ở
+header nên chiếm chỗ trên cả bốn bước dù đã gập lại. Nhãn nav hiện phần trăm tổng
+để biết khi nào cần mở, kèm dấu tròn xanh khi đang có stage chạy.
 
 Chạy sau khi `../indexer` đã xong. Service **không load model ML nào** — align
 dùng `kps` đã lưu trong `fp_face`, nên RAM chỉ ~300MB.

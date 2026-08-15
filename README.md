@@ -160,6 +160,10 @@ dùng multi-stage, compiler chỉ nằm ở stage build.
 
 ## Bốn bước trên UI
 
+Nếu chỉ muốn kết quả nhanh: chọn người rồi bấm **Tạo video ngay** — service tự
+suy ngưỡng, chọn ảnh và dựng video trong một cú bấm. Bốn bước dưới đây là đường
+**nâng cao**, dùng khi muốn tự tay kiểm soát từng khâu.
+
 **1. Chọn người.** Danh sách lấy từ cụm khuôn mặt Immich đã phân loại. Immich
 thường tách **một người thành nhiều cụm** ở các mốc tuổi khác nhau — bé, thiếu
 niên, trưởng thành thành ba cụm riêng. Chọn được nhiều cụm cùng lúc, và nút "Tìm

@@ -152,12 +152,20 @@ progress{width:100%;height:9px;margin:8px 0}
 .fprev figcaption{padding:6px 9px;color:var(--muted);font-size:12px;
   font-variant-numeric:tabular-nums}
 
-/* tien do job indexer, gap lai duoc de khong chiem cho header */
-details.idx{margin:10px 0 0;font-size:12.5px}
-details.idx summary{color:var(--muted);cursor:pointer;padding:2px 0}
-details.idx summary b{color:var(--acc);font-weight:600}
-details.idx summary .bad{color:var(--bad)}
-details.idx[open] summary{margin-bottom:8px}
+/* muc nav sang trang thong ke: day sang phai, luon bam duoc */
+#steps button.aside{margin-left:auto}
+#steps button.aside.warnDot::after{content:"";display:inline-block;width:6px;
+  height:6px;border-radius:50%;background:var(--ok);margin-left:6px;
+  vertical-align:middle}
+
+/* bang lich su cac lan chay stage */
+table.runs{width:100%;border-collapse:collapse;font-size:12.5px}
+table.runs th{text-align:left;color:var(--muted);font-weight:500;
+  border-bottom:1px solid var(--line);padding:6px 10px 6px 0}
+table.runs td{padding:5px 10px 5px 0;border-bottom:1px solid var(--line);
+  font-variant-numeric:tabular-nums}
+#idxBars{margin:14px 0 6px}
+
 .prow{display:grid;grid-template-columns:190px 1fr 150px;gap:12px;
   align-items:center;margin:5px 0}
 .plab{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -15,9 +15,11 @@
     <button data-step="2" disabled>2. Ảnh tự chọn</button>
     <button data-step="3" disabled>3. Tinh chỉnh</button>
     <button data-step="4" disabled>4. Dựng video</button>
+    <!-- Khong co data-step: step() bo qua nen luon bam duoc, va khong tham gia
+         vao logic mo dan cac buoc. -->
+    <button id="navStats" class="aside">Thống kê</button>
   </nav>
   <div id="health" class="muted"></div>
-  <div id="progress"></div>
 </header>
 
 <main>
@@ -59,7 +61,8 @@
     </label>
     <button id="findSim">Tìm cụm cùng người</button>
     <button id="clearPick">Bỏ chọn</button>
-    <button id="mkProject" class="primary">Lấy ảnh →</button>
+    <button id="mkAdvanced">Tinh chỉnh từng bước →</button>
+    <button id="mkVideo" class="primary">Tạo video ngay</button>
   </div>
 </section>
 
@@ -217,6 +220,25 @@
       <div id="renderList"></div>
     </div>
   </div>
+</section>
+
+<!-- ================================================== thống kê index -->
+<!-- Trang rieng, khong nam trong luong 4 buoc. Truoc day khoi nay o header
+     nen chiem cho tren ca 4 buoc du da gap lai. -->
+<section id="sStats" class="step">
+  <div class="bar">
+    <h3>Tiến độ index</h3>
+    <button id="statsReload">Tải lại</button>
+    <span id="statsAt" class="muted"></span>
+  </div>
+  <p class="muted">Job indexer chạy ngoài service này (CronJob riêng), nên đây
+    chỉ là đọc trạng thái từ các cột state trong <code>fp_asset</code>.</p>
+
+  <div id="idxCards" class="cards"></div>
+  <div id="idxBars"></div>
+
+  <h3>Các lần chạy gần nhất</h3>
+  <div id="idxRuns"></div>
 </section>
 
 </main>

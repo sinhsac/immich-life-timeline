@@ -10,7 +10,7 @@ const S = {
   person: null, projectId: null, filters: {}, defaults: null,
   result: null, renderId: null, poll: null, postures: [], orients: [],
   statusTimer: null, prevTimer: null,
-  picked: new Map(), people: [], sug: [],
+  picked: new Map(), people: [], sug: [], view: 1,
 };
 
 const num = (n) => (n || 0).toLocaleString('vi-VN');
@@ -72,11 +72,24 @@ function toast(msg, bad) {
 function step(n) {
   document.querySelectorAll('.step').forEach((s) => s.classList.remove('on'));
   $('s' + n).classList.add('on');
+  // #navStats khong co data-step nen vong nay khong bat/tat no, chi bo .on
   document.querySelectorAll('#steps button').forEach((b) => {
     b.classList.toggle('on', b.dataset.step === String(n));
     if (Number(b.dataset.step) <= n) b.disabled = false;
   });
+  S.view = n;
   window.scrollTo(0, 0);
+}
+
+// Trang thong ke: khong thuoc luong 4 buoc, vao ra khong lam mat tien do dang lam.
+function showStats() {
+  document.querySelectorAll('.step').forEach((s) => s.classList.remove('on'));
+  document.querySelectorAll('#steps button').forEach((b) => b.classList.remove('on'));
+  $('sStats').classList.add('on');
+  $('navStats').classList.add('on');
+  S.view = 'stats';
+  window.scrollTo(0, 0);
+  pollStatus();                 // lam moi ngay khi mo, khong doi chu ky 20s
 }
 
 // ================================================================ khoi dong
@@ -86,7 +99,10 @@ function step(n) {
   });
   $('reload').onclick = loadPeople;
   $('findSim').onclick = findSimilar;
-  $('mkProject').onclick = buildProject;
+  $('mkVideo').onclick = () => buildProject(true);
+  $('mkAdvanced').onclick = () => buildProject(false);
+  $('navStats').onclick = showStats;
+  $('statsReload').onclick = pollStatus;
   $('pickAllSug').onclick = pickAllSuggestions;
   $('hideSug').onclick = () => $('simBox').classList.add('hide');
   $('clearPick').onclick = () => { S.picked.clear(); syncPicked(); };
@@ -153,29 +169,67 @@ function showHealth(h) {
 // Job indexer chay ngoai service nay (CronJob rieng), nen UI chi doc trang thai
 // tu cac cot state trong fp_asset. Tu dong tat polling khi da xong.
 function showProgress(p) {
-  if (!p.ready) { $('progress').innerHTML = ''; return; }
+  // Nhan tren nav: chi mot con so, de nguoi dung biet co can mo trang thong ke
+  // hay khong ma khong chiem cho tren cac buoc khac.
+  const nav = $('navStats');
+  if (p.ready) {
+    const done = p.stages.reduce((a, s) => a + s.done, 0);
+    const total = p.stages.reduce((a, s) => a + s.total, 0) || 1;
+    const pct = Math.round(100 * done / total);
+    nav.textContent = `Thống kê · ${pct}%`;
+    nav.classList.toggle('warnDot', !!p.running);
+  } else {
+    nav.textContent = 'Thống kê';
+  }
 
-  const bars = p.stages.map((s) => {
+  if (!p.ready) {
+    $('idxCards').innerHTML = '';
+    $('idxBars').innerHTML = '<p class="muted">Chưa có bảng fp_asset — '
+      + 'job indexer chưa chạy lần nào.</p>';
+    $('idxRuns').innerHTML = '';
+    return;
+  }
+
+  $('idxCards').innerHTML = [
+    ['n_asset', 'ảnh trong thư viện'],
+    ['n_face', 'khuôn mặt'],
+    ['n_face_ready', 'face có landmark'],
+    ['n_body', 'thân người'],
+  ].map(([k, lab]) => `<div class="card"><b>${num(p[k])}</b><span>${lab}</span></div>`)
+    .join('')
+    + (((p.face_err || 0) + (p.body_err || 0))
+      ? `<div class="card"><b class="bad">${num((p.face_err || 0) + (p.body_err || 0))}</b>`
+        + '<span>ảnh lỗi đọc</span></div>' : '');
+
+  $('idxBars').innerHTML = p.stages.map((s) => {
     const left = Math.max(0, s.total - s.done);
     return `<div class="prow${p.running === s.name ? ' run' : ''}">`
-      + `<span class="plab">${s.label}</span>`
+      + `<span class="plab">${s.label}`
+      + (p.running === s.name ? ' <b>đang chạy</b>' : '') + '</span>'
       + `<span class="pbar"><i style="width:${Math.min(100, s.pct)}%"></i></span>`
       + `<span class="pnum">${s.pct}%<em>${num(s.done)}/${num(s.total)}`
       + (left ? ` · còn ${num(left)}` : '') + '</em></span></div>';
-  }).join('');
+  }).join('')
+    + (p.running
+      ? ''
+      : '<p class="muted">Không có stage nào đang chạy. Job kế tiếp sẽ tiếp tục '
+        + 'đúng chỗ dở — tiến độ nằm trong database, không mất khi tắt máy.</p>');
 
-  const bits = [];
-  bits.push(p.running
-    ? `đang chạy <b>${p.running}</b>`
-    : 'không có stage nào đang chạy');
-  bits.push(`${num(p.n_face_ready)} face có landmark`);
-  if (p.n_body) bits.push(`${num(p.n_body)} thân người`);
-  const nerr = (p.face_err || 0) + (p.body_err || 0);
-  if (nerr) bits.push(`<span class="bad">${num(nerr)} ảnh lỗi đọc</span>`);
+  $('idxRuns').innerHTML = (p.runs || []).length
+    ? '<table class="runs"><tr><th>Stage</th><th>Bắt đầu</th><th>Xong</th>'
+      + '<th>Kết quả</th><th>Lỗi</th><th>Ghi chú</th></tr>'
+      + p.runs.map((r) => '<tr>'
+        + `<td>${r.stage}</td>`
+        + `<td>${(r.started_at || '').slice(0, 19).replace('T', ' ')}</td>`
+        + `<td>${r.running ? '<b>đang chạy</b>'
+          : (r.finished_at || '').slice(11, 19)}</td>`
+        + `<td>${num(r.n_done)}</td>`
+        + `<td>${r.n_err ? `<span class="bad">${num(r.n_err)}</span>` : '0'}</td>`
+        + `<td class="muted">${r.note || ''}</td></tr>`).join('')
+      + '</table>'
+    : '<p class="muted">chưa có lần chạy nào</p>';
 
-  $('progress').innerHTML =
-    `<details class="idx"${progressDone(p) ? '' : ' open'}>`
-    + `<summary>Index: ${bits.join(' · ')}</summary>${bars}</details>`;
+  $('statsAt').textContent = 'cập nhật ' + new Date().toLocaleTimeString('vi-VN');
 }
 
 const progressDone = (p) => p.ready && p.stages.every((s) => s.done >= s.total);
@@ -321,7 +375,9 @@ function pickAllSuggestions() {
   toast(`Đã chọn ${ok.length} cụm gợi ý (bỏ qua cụm đã có tên khác)`);
 }
 
-async function buildProject() {
+// auto = true: lam het mot lan cho den khi ra video.
+// auto = false: dung o buoc 2 de nguoi dung tinh chinh nhu truoc.
+async function buildProject(auto) {
   const list = [...S.picked.values()];
   if (!list.length) return;
   S.person = {
@@ -330,7 +386,8 @@ async function buildProject() {
     last_seen: list.map((p) => p.last_seen).filter(Boolean).sort().pop(),
     n_cluster: list.length,
   };
-  $('mkProject').disabled = true;
+  $('mkVideo').disabled = true;
+  $('mkAdvanced').disabled = true;
   toast(`Đang lấy ảnh từ ${list.length} cụm…`);
   try {
     const r = await api('/projects', {
@@ -345,11 +402,30 @@ async function buildProject() {
     S.filters = r.filters;
     setFilterUI(r.filters);
     showStep2(r);
-    step(2);
+
+    if (!auto) { step(2); return; }
+
+    // ffmpeg can it nhat 2 frame moi ghep duoc video. Duoi nguong do thi khong
+    // render bua roi bao loi kho hieu — day nguoi dung sang buoc 3 kem ly do.
+    if (r.n_selected < 2) {
+      step(3);
+      renderResult();
+      toast(`Chỉ chọn được ${r.n_selected} ảnh, cần ít nhất 2. `
+        + 'Nới ngưỡng bên trái rồi bấm Áp dụng.', true);
+      return;
+    }
+
+    step(4);
+    loadRenders();
+    estimate();
+    renderPreview();
+    await startRender();
+    toast(`${r.n_selected} ảnh, đang dựng video…`);
   } catch (e) {
     toast(e.message, true);
   } finally {
-    $('mkProject').disabled = false;
+    $('mkVideo').disabled = false;
+    $('mkAdvanced').disabled = false;
   }
 }
 
