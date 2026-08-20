@@ -699,7 +699,10 @@ def clips(conn, s, t, media):
                         target_ms=int(s.clip_seconds * 1000),
                         min_ms=int(s.clip_min_seconds * 1000),
                         max_ms=int(s.clip_max_seconds * 1000),
-                        gap_ms=s.video_gap_ms, top=s.clip_per_person)
+                        gap_ms=s.video_gap_ms, top=s.clip_per_person,
+                        # Can do dai video de khong noi doan vuot qua cuoi file.
+                        # dur_ms tu db co the NULL -> lay tu header video.
+                        dur_ms=dur_ms or (info[2] or 0))
                     for cidx, wn in enumerate(wins):
                         agg = CL.summarize(wn["frames"])
                         picked.append((

@@ -177,6 +177,51 @@ def window_around(run, peak, target_ms, min_ms, max_ms):
     return (i, j) if j > i else None
 
 
+def clip_bounds(run, i, j, peak, sample_ms, min_ms, max_ms, dur_ms=0):
+    """Bien thoi gian THAT cua mot doan. Tra ve (t_start_ms, t_end_ms).
+
+    Frame chi la BANG CHUNG rai rac, khong phai bien cua doan. Truoc day
+    t_start/t_end lay thang t_ms cua frame khop dau va cuoi, nen voi lay mau
+    2 fps mot nguoi chi detect duoc o 2 frame se ra doan 0.48s: ngan hon min_ms,
+    va bi bo loc min_clip_seconds cua UI (mac dinh 0.8s) nem di. Cong quet coi
+    nhu bo.
+
+    Cho phep noi qua frame ngoai cung dung MOT khoang lay mau. Mot frame o thoi
+    diem t dai dien cho khoang +-sample_ms/2 quanh no, nen noi them chung do la
+    suy luan hop ly ("con o trong khung them khoang mot nhip mau nua"), khong
+    phai doan bua ca giay. Tran nay tinh theo bien cua RUN chu khong theo cua so
+    (i, j), de khong bao gio keo vao khuc ma nguoi do da roi khoi khung.
+    """
+    sample_ms = max(1.0, float(sample_ms))
+    span = run[j]["t_ms"] - run[i]["t_ms"]
+    want = max(float(min_ms), min(float(max_ms), span + sample_ms))
+    if dur_ms:
+        want = min(want, float(dur_ms))
+
+    lo = max(0.0, run[0]["t_ms"] - sample_ms)
+    hi = run[-1]["t_ms"] + sample_ms
+    if dur_ms:
+        hi = min(hi, float(dur_ms))
+
+    if hi - lo <= want:
+        # Run ngan hon do dai muon co -> lay tron run (da noi hai dau).
+        t0, t1 = lo, hi
+    else:
+        t0 = run[peak]["t_ms"] - want * PEAK_POS
+        t1 = t0 + want
+        # Cham bien thi DAY vao trong, giu nguyen do dai, khong cat ngan.
+        if t0 < lo:
+            t0, t1 = lo, lo + want
+        elif t1 > hi:
+            t0, t1 = hi - want, hi
+
+    # Bat buoc: moc khoanh khac phai nam trong doan cua no.
+    t_peak = float(run[peak]["t_ms"])
+    t0 = min(t0, t_peak)
+    t1 = max(t1, t_peak)
+    return int(round(t0)), int(round(t1))
+
+
 def score_window(win, sample_ms, target_ms):
     """Diem cua mot cua so, da tinh do rung va do day frame."""
     if len(win) < 2:
@@ -198,7 +243,7 @@ def score_window(win, sample_ms, target_ms):
 
 
 def best_windows(samples, sample_ms, target_ms=2600, min_ms=1200, max_ms=4500,
-                 gap_ms=800, top=3):
+                 gap_ms=800, top=3, dur_ms=0):
     """Cac doan tot nhat, khong chong nhau, xep theo diem giam dan.
 
     Moi doan sinh ra tu MOT khoanh khac, khong phai tu viec ro tim moi cach cat
@@ -216,8 +261,9 @@ def best_windows(samples, sample_ms, target_ms=2600, min_ms=1200, max_ms=4500,
             win = run[i:j + 1]
             sc, meta = score_window(win, sample_ms, target_ms)
             if sc > 0:
-                cands.append((sc, run[i]["t_ms"], run[j]["t_ms"],
-                              run[p]["t_ms"], win, meta))
+                t0, t1 = clip_bounds(run, i, j, p, sample_ms, min_ms, max_ms,
+                                     dur_ms)
+                cands.append((sc, t0, t1, run[p]["t_ms"], win, meta))
 
     # Doan qua ngan de dat min_ms: van lay ca doan neu no du dai toi thieu 0.6s.
     # Video 1 giay co nguoi do van dang hon la bo han.
@@ -230,9 +276,10 @@ def best_windows(samples, sample_ms, target_ms=2600, min_ms=1200, max_ms=4500,
             sc, meta = score_window(run, sample_ms, target_ms)
             if sc > 0:
                 pk = peaks(run, 0, top=1)
-                cands.append((sc, run[0]["t_ms"], run[-1]["t_ms"],
-                              run[pk[0]]["t_ms"] if pk else run[0]["t_ms"],
-                              run, meta))
+                p = pk[0] if pk else 0
+                t0, t1 = clip_bounds(run, 0, len(run) - 1, p, sample_ms,
+                                     min_ms, max_ms, dur_ms)
+                cands.append((sc, t0, t1, run[p]["t_ms"], run, meta))
 
     cands.sort(key=lambda x: -x[0])
     picked = []

@@ -96,8 +96,16 @@ def t_windows():
                            max_ms=4500, gap_ms=800, top=3)
     check(len(wins) >= 1, "chon duoc it nhat mot doan")
     top = wins[0]
-    check(4000 <= top["t_start_ms"] and top["t_end_ms"] <= 7000,
-          f"doan tot nhat nam trong 4-7s (duoc {top['t_start_ms']}-{top['t_end_ms']})")
+    # Doan duoc noi toi da MOT khoang lay mau ra ngoai frame ngoai cung (xem
+    # clip_bounds), nen no khong con nam tron trong 4-7s nua. Kiem tra theo phan
+    # CHONG voi khuc tot, va theo cho dat khoanh khac.
+    dur = top["t_end_ms"] - top["t_start_ms"]
+    ov = min(top["t_end_ms"], 7000) - max(top["t_start_ms"], 4000)
+    check(dur > 0 and ov / dur >= 0.7,
+          f"doan tot nhat chu yeu nam trong 4-7s "
+          f"(duoc {top['t_start_ms']}-{top['t_end_ms']}, chong {ov}/{dur})")
+    check(4000 <= top["t_peak_ms"] <= 7000,
+          f"khoanh khac nam trong khuc tot (duoc {top['t_peak_ms']})")
     check(1200 <= top["dur_ms"] <= 4500, f"do dai trong khoang ({top['dur_ms']}ms)")
     check(all(wins[i]["score"] >= wins[i + 1]["score"] for i in range(len(wins) - 1)),
           "xep theo diem giam dan")
@@ -122,6 +130,34 @@ def t_windows():
 
     # khong co frame nao -> khong no
     check(CL.best_windows([], 500) == [], "danh sach rong -> khong co doan")
+
+    # --- hoi quy: bang chung thua thot khong duoc ra doan ngan hon min_ms ---
+    # Truoc khi co clip_bounds, t_start/t_end lay thang t_ms cua frame dau/cuoi
+    # nen hai frame cach nhau 480ms ra doan 480ms. Bo loc min_clip_seconds cua
+    # UI (0.8s) nem het nhung doan nay di: quet ton CPU roi bo.
+    sparse = [frame(112800), frame(113280)]
+    w = CL.best_windows(sparse, 500, target_ms=2600, min_ms=1200, max_ms=4500,
+                        gap_ms=800, top=3)
+    check(len(w) == 1, f"hai frame roi rac van ra mot doan ({len(w)})")
+    d = w[0]["t_end_ms"] - w[0]["t_start_ms"]
+    check(d >= 1200, f"doan tu bang chung thua thot van dat min_ms (duoc {d}ms)")
+    check(w[0]["t_start_ms"] <= w[0]["t_peak_ms"] <= w[0]["t_end_ms"],
+          "khoanh khac van nam trong doan da noi")
+
+    # Khong duoc noi vuot qua cuoi video khi biet dur_ms.
+    w2 = CL.best_windows(sparse, 500, min_ms=1200, max_ms=4500, gap_ms=800,
+                         dur_ms=113500)
+    check(w2 and w2[0]["t_end_ms"] <= 113500,
+          f"khong noi vuot cuoi video (duoc {w2 and w2[0]['t_end_ms']})")
+    check(w2 and w2[0]["t_start_ms"] >= 0, "khong noi xuong duoi 0")
+
+    # Bang chung day du thi do dai van bam target, khong bi phinh len max_ms.
+    dense = [frame(t) for t in range(0, 6001, 500)]
+    w3 = CL.best_windows(dense, 500, target_ms=2600, min_ms=1200, max_ms=4500,
+                         gap_ms=800, top=1)
+    check(w3 and 1200 <= (w3[0]["t_end_ms"] - w3[0]["t_start_ms"]) <= 4500,
+          f"bang chung day du -> do dai trong khoang "
+          f"(duoc {w3 and w3[0]['t_end_ms'] - w3[0]['t_start_ms']}ms)")
 
 
 def t_peaks():
