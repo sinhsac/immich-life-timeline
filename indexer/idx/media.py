@@ -23,8 +23,12 @@ class MediaReader:
         self.n_file = 0
         self.n_http = 0
         self.n_miss = 0
-        if not self.root:
-            self.cache.mkdir(parents=True, exist_ok=True)
+        self.n_vid_file = 0
+        self.n_vid_http = 0
+        self.n_vid_skip = 0
+        # Luon tao cache: ke ca khi co MEDIA_ROOT, video van co the phai tai qua
+        # HTTP (thu vien external khong nam trong volume upload).
+        self.cache.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------ duong 1
     def resolve(self, preview_path):
@@ -103,6 +107,89 @@ class MediaReader:
             img = downscale(img, max_side)
         return img, tmp
 
+    # ------------------------------------------------------------ video
+    def read_video(self, asset_id, video_path):
+        """Tra ve (path, tmp, why). path=None thi why noi ly do.
+
+        Giong read() cho anh: uu tien file tren volume, khong co thi tai qua
+        HTTP. Khac o cho video KHONG resize/decode san duoc — cv2.VideoCapture
+        can mot file cuc bo seek duoc, nen che do HTTP phai tai het file.
+
+        'tmp' khac None nghia la file do ta tai ve, goi release(tmp) sau khi quet.
+        """
+        p = self.resolve(video_path)
+        if p is not None:
+            self.n_vid_file += 1
+            return p, None, None
+        if not (self.s.immich_url and self.s.immich_api_key):
+            return None, None, "khong thay file video, va chua cau hinh IMMICH_URL"
+        dst, why = self._download_video(asset_id, video_path)
+        if dst is None:
+            return None, None, why
+        self.n_vid_http += 1
+        return dst, dst, None
+
+    def _download_video(self, asset_id, video_path=""):
+        """Tai video ve cache. Tra ve (Path, None) hoac (None, ly do).
+
+        Uu tien ban playback: Immich transcode ra H.264 mp4 nen luon decode
+        duoc, con ban goc co the la HEVC/AV1 ma OpenCV khong mo noi. Neu chua
+        transcode thi Immich tra chinh ban goc cho endpoint nay.
+        """
+        base = self.s.immich_url.rstrip("/")
+        if not base.endswith("/api"):
+            base += "/api"
+        cap = int(self.s.video_max_mb * 1024 * 1024) if self.s.video_max_mb else 0
+        suffix = Path(str(video_path)).suffix or ".mp4"
+        last = "khong ro"
+        for url, ext in ((f"{base}/assets/{asset_id}/video/playback", ".mp4"),
+                         (f"{base}/assets/{asset_id}/original", suffix)):
+            try:
+                r = self._session().get(url, timeout=self.s.http_timeout,
+                                        stream=True)
+            except Exception as e:                        # noqa: BLE001
+                last = f"loi mang: {e}"
+                continue
+            with r:
+                if r.status_code in (404, 400):
+                    last = f"http {r.status_code}"
+                    continue
+                if r.status_code >= 400:
+                    last = f"http {r.status_code}"
+                    continue
+                # Chan TRUOC khi tai neu server da khai content-length.
+                n = int(r.headers.get("content-length") or 0)
+                if cap and n > cap:
+                    return None, (f"video {n / 1e6:.0f}MB vuot tran "
+                                  f"VIDEO_MAX_MB={self.s.video_max_mb:g}")
+                dst = self.cache / f"{asset_id}{ext}"
+                got = 0
+                try:
+                    with open(dst, "wb") as f:
+                        for chunk in r.iter_content(1 << 20):
+                            if not chunk:
+                                continue
+                            got += len(chunk)
+                            # Van phai dem khi tai: chunked encoding khong co
+                            # content-length nen kiem tra o tren khong du.
+                            if cap and got > cap:
+                                raise _TooBig(got)
+                            f.write(chunk)
+                except _TooBig as e:
+                    self.release(dst)
+                    return None, (f"video >{e.n / 1e6:.0f}MB vuot tran "
+                                  f"VIDEO_MAX_MB={self.s.video_max_mb:g}")
+                except Exception as e:                    # noqa: BLE001
+                    self.release(dst)
+                    last = f"tai loi: {e}"
+                    continue
+                if got == 0:
+                    self.release(dst)
+                    last = "file rong"
+                    continue
+                return dst, None
+        return None, f"khong tai duoc video ({last})"
+
     @staticmethod
     def release(tmp):
         if tmp:
@@ -112,8 +199,20 @@ class MediaReader:
                 pass
 
     def stats(self):
-        return (f"anh doc: {self.n_file} tu file, {self.n_http} qua http, "
-                f"{self.n_miss} khong doc duoc")
+        out = (f"anh doc: {self.n_file} tu file, {self.n_http} qua http, "
+               f"{self.n_miss} khong doc duoc")
+        if self.n_vid_file or self.n_vid_http or self.n_vid_skip:
+            out += (f"\nvideo doc: {self.n_vid_file} tu file, "
+                    f"{self.n_vid_http} qua http, {self.n_vid_skip} bo qua")
+        return out
+
+
+class _TooBig(Exception):
+    """Vuot VIDEO_MAX_MB giua khi dang tai."""
+
+    def __init__(self, n):
+        super().__init__(str(n))
+        self.n = n
 
 
 def _imread(path):

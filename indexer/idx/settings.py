@@ -77,6 +77,17 @@ class Settings:
     video_fps: float = field(default_factory=lambda: _f("VIDEO_FPS", 2.0))
     video_max_side: int = field(default_factory=lambda: _i("VIDEO_MAX_SIDE", 960))
     video_max_seconds: float = field(default_factory=lambda: _f("VIDEO_MAX_SECONDS", 0))
+    # Tran dung lieu khi PHAI tai video qua HTTP (khong co MEDIA_ROOT).
+    #
+    # cv2.VideoCapture can mot file cuc bo doc duoc ngau nhien, nen che do HTTP
+    # buoc phai tai het file truoc khi quet. Do thuc te tren thu vien nay:
+    # median 1.7MB, p90 1MB, nhung p99 la 144MB va dai nhat 659MB. Khong chan
+    # thi mot video 66 phut se chiem het bang thong va dia cua ca lo.
+    #
+    # 200MB phu ~99% thu vien. Video vuot tran bi ghi clip_state=-1 kem ly do,
+    # chay 'job.py --reset clips' sau khi nang tran la quet lai duoc.
+    # Dat 0 de bo tran.
+    video_max_mb: float = field(default_factory=lambda: _f("VIDEO_MAX_MB", 200))
     video_det_size: int = field(default_factory=lambda: _i("VIDEO_DET_SIZE", 512))
     video_det_conf: float = field(default_factory=lambda: _f("VIDEO_DET_CONF", 0.45))
     # Cosine toi thieu voi vector trung tam cua mot person trong fp_face.

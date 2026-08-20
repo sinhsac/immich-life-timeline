@@ -106,4 +106,9 @@ spec:
                 type: Directory
             - name: cache
               emptyDir:
-                sizeLimit: 512Mi
+                # Ban nay mount volume upload nen video doc thang tu file, cache
+                # chi chua anh tam. Nhung neu bo MEDIA_ROOT de chay che do HTTP
+                # thi stage clips tai ca file video vao day (toi VIDEO_MAX_MB),
+                # nen de rong san. Dung them 'medium: Memory': tmpfs tinh vao
+                # memory limit cua pod.
+                sizeLimit: 1Gi

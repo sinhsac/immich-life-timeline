@@ -176,9 +176,12 @@ def _dry_video(conn, s, t, media):
     if not t.can_video():
         print("  [--] Immich khong co cot duong dan video -> stage clips bo qua")
         return True
-    if not media.root:
-        print("  [LOI] stage clips can MEDIA_ROOT, che do HTTP khong dung duoc")
+    if not media.root and not (s.immich_url and s.immich_api_key):
+        print("  [LOI] stage clips can MEDIA_ROOT hoac IMMICH_URL + IMMICH_API_KEY")
         return False
+    if not media.root:
+        print(f"  [ok] che do HTTP: tai video qua {s.immich_url}, "
+              f"tran {s.video_max_mb:g}MB")
     try:
         from idx.facedetect import FaceDetector, PersonIndex
         fd = FaceDetector(s)
@@ -203,22 +206,26 @@ def _dry_video(conn, s, t, media):
         print("  [--] fp_asset chua co video nao, chay --stage assets truoc")
         return ok
     for aid, vpath in rows:
-        p = media.resolve(vpath)
+        p, tmp, why = media.read_video(str(aid), vpath)
         if p is None:
-            print(f"  [LOI] khong tim thay file video cua {aid} (path={vpath})")
+            print(f"  [LOI] khong doc duoc video cua {aid}: {why}")
             ok = False
             continue
-        info = video_info(p)
-        if info is None:
-            print(f"  [LOI] khong mo duoc {p}")
-            ok = False
-            continue
-        fps, nf, dur, w, h = info
-        got = 0
-        for _t, img in video_frames(p, s.video_fps, s.video_max_side, 2.0):
-            got += 1
-        print(f"  [ok] {p.name}: {w}x{h} {fps:.1f}fps {dur / 1000:.1f}s "
-              f"-> lay mau duoc {got} frame trong 2 giay dau")
+        try:
+            info = video_info(p)
+            if info is None:
+                print(f"  [LOI] khong mo duoc {p}")
+                ok = False
+                continue
+            fps, nf, dur, w, h = info
+            got = 0
+            for _t, img in video_frames(p, s.video_fps, s.video_max_side, 2.0):
+                got += 1
+            how = "tu file" if tmp is None else "tai qua http"
+            print(f"  [ok] {p.name} ({how}): {w}x{h} {fps:.1f}fps "
+                  f"{dur / 1000:.1f}s -> lay mau duoc {got} frame trong 2 giay dau")
+        finally:
+            media.release(tmp)
         break
     return ok
 

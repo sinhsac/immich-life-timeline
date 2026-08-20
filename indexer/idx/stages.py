@@ -606,10 +606,14 @@ def clips(conn, s, t, media):
     if not t.can_video():
         print("  Immich khong co cot duong dan video -> bo qua")
         return 0
-    if not media.root:
-        print("  stage clips can MEDIA_ROOT (doc file video truc tiep).\n"
-              "  Che do IMMICH_URL khong dung duoc: phai tai ca video ve moi quet.")
+    if not (media.root or (s.immich_url and s.immich_api_key)):
+        print("  stage clips can MEDIA_ROOT hoac IMMICH_URL + IMMICH_API_KEY.")
         return 0
+    if not media.root:
+        # Che do HTTP: giong anh, nhung dat hon nhieu vi phai tai HET file moi
+        # quet duoc (cv2.VideoCapture can file seek duoc, khong stream duoc).
+        print(f"  che do HTTP: tai video qua {s.immich_url}, "
+              f"tran {s.video_max_mb:g}MB moi file")
 
     with conn.cursor() as cur:
         cur.execute(f"SELECT COUNT(*) FROM {a_tbl} "
@@ -666,19 +670,26 @@ def clips(conn, s, t, media):
                     break
                 aid, vpath, dur_ms = str(row[0]), row[1], row[2]
 
-                path = media.resolve(vpath)
+                path, tmp, why = media.read_video(aid, vpath)
                 if path is None:
-                    _fail_clip(conn, s, aid, "khong tim thay file video")
+                    if "vuot tran" in (why or ""):
+                        media.n_vid_skip += 1
+                    _fail_clip(conn, s, aid, why or "khong doc duoc video")
                     n_err += 1
                     continue
-                info = video_info(path)
-                if info is None:
-                    _fail_clip(conn, s, aid, "khong mo duoc video")
-                    n_err += 1
-                    continue
-
-                per_person, rows_vf, nf = _scan_video(
-                    path, aid, model, index, s, video_frames)
+                # Tu day tro di PHAI tra file tam ve, ke ca khi loi: che do HTTP
+                # tai ca file video vao cache, khong xoa thi dia day sau vai
+                # tram video.
+                try:
+                    info = video_info(path)
+                    if info is None:
+                        _fail_clip(conn, s, aid, "khong mo duoc video")
+                        n_err += 1
+                        continue
+                    per_person, rows_vf, nf = _scan_video(
+                        path, aid, model, index, s, video_frames)
+                finally:
+                    media.release(tmp)
                 n_frame += nf
 
                 picked = []
