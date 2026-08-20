@@ -73,6 +73,49 @@ def symmetry(aligned_gray):
     return float(max(0.0, min(1.0, (a * b).sum() / den)))
 
 
+def pose_from_kps5(kps):
+    """Uoc luong (yaw, pitch, roll) chi tu 5 diem, KHONG dung model nao.
+
+    Dung cho frame video: mot clip 3 giay lay mau 2 fps la 6 frame, moi frame co
+    the co vai mat — chay them 1k3d68 cho tung mat la nhan doi chi phi cua stage
+    dat nhat. Ma de LOC doan (mat co huong vao may khong) thi khong can do chinh
+    xac den do.
+
+    Cach tinh, sau khi quay khung ve cho hai mat nam ngang:
+      roll   goc that cua duong noi hai mat, cai nay chinh xac
+      yaw    mui lech khoi trung diem hai mat bao nhieu, chia cho khoang cach
+             hai mat. Chinh dien ~0, quay 30 do thi ~0.35 -> nhan 80 ra do
+      pitch  mui nam o dau giua duong mat va duong mieng. Chinh dien ~0.5
+
+    Hai gia tri sau la UOC LUONG, dung de xep hang va loc, dung dem ra so do.
+    """
+    k = np.asarray(kps, np.float32)
+    if k.shape[0] < 5:
+        return 0.0, 0.0, 0.0
+    le, re, nose = k[0], k[1], k[2]
+    mouth = (k[3] + k[4]) / 2.0
+    d = re - le
+    dist = float(np.hypot(d[0], d[1]))
+    if dist < 1e-3:
+        return 0.0, 0.0, 0.0
+    roll = float(np.degrees(np.arctan2(d[1], d[0])))
+
+    # quay ve he toa do cua khuon mat -> yaw/pitch khong bi roll lam nhieu
+    c, s = np.cos(np.radians(-roll)), np.sin(np.radians(-roll))
+    rot = np.array([[c, -s], [s, c]], np.float32)
+    eye_mid = (le + re) / 2.0
+    n = rot @ (nose - eye_mid)
+    m = rot @ (mouth - eye_mid)
+
+    yaw = float(np.clip(n[0] / dist * 80.0, -90.0, 90.0))
+    span = float(m[1])
+    if abs(span) < 1e-3:
+        pitch = 0.0
+    else:
+        pitch = float(np.clip((0.5 - n[1] / span) * 90.0, -90.0, 90.0))
+    return yaw, pitch, roll
+
+
 def frontality(yaw, pitch, roll, symm=None):
     ang = 1.0 - min(1.0, abs(yaw) / 35.0 + abs(pitch) / 30.0 + abs(roll) / 45.0)
     ang = max(0.0, ang)

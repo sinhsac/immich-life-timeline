@@ -1,15 +1,23 @@
-"""Man hinh 4: align tung frame roi goi ffmpeg dung video.
+"""Man hinh 4: dung video tu danh sach anh da chon.
 
-Hai buoc:
-  frames    doc anh preview, align ve cung vi tri mat, ghi f_00001.jpg...
-  encoding  ffmpeg ghep chuoi anh thanh mp4
+Hai che do, khac han nhau ve ban chat:
 
-Chu de "hanh trinh mot nguoi": vi moi frame da align nen mat nam dung mot cho,
-xem lai giong mot khuon mat lon dan chu khong phai slideshow nhay loan.
+  mode='story'  (mac dinh) Ke chuyen. Moi anh la mot SHOT co do dai rieng: anh
+                chu dao cua chuong duoc giu lau, anh phu di nhanh; cac shot chong
+                mo len nhau; zoom cham quanh diem neo mat; nhan chuong hien ra roi
+                tan di; mo man tu den va dong man ve den. Frame duoc sinh o dung
+                fps dau ra roi day THANG vao stdin cua ffmpeg — khong ghi jpg ra
+                dia, khong encode hai lan.
+
+  mode='flip'   Cach cu: mot anh mot frame, deu tang tang, ffmpeg ghep chuoi jpg.
+                Giu lai vi no re va co nguoi thich kieu "flipbook" that.
+
+Vi sao khong dung filter xfade/zoompan cua ffmpeg: chuoi xfade cho 60 clip sinh
+ra filtergraph khong lo, ton RAM va rat kho suy ra thoi luong chinh xac. Sinh
+frame bang numpy thi moi frame la mot phep warpAffine — de kiem soat, de tinh
+dung so frame, va van du nhanh vi anh preview chi 1440px.
 
 Chi cho phep MOT render chay cung luc — may 8GB dung chung voi Immich.
-Nhan date len anh bang cv2.putText thay vi drawtext cua ffmpeg, de khoi phai
-mount font vao container.
 """
 import json
 import shutil
@@ -19,40 +27,96 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 
-from . import media, projects
+from . import media, projects, story, textdraw
 from .db import rows
 from .settings import get
 
 DEFAULT_OPTIONS = {
+    # ---------------- khung hinh (dung cho ca hai che do) ----------------
     "size": 900,          # CANH DAI cua khung ra
     "aspect": "4:3",      # ty le khung, xem media.ASPECTS
-    # Khoang cach hai mat / chieu ngang khung. Day la tham so quyet dinh khung
-    # anh lay rong hay hep: 0.55 = chan dung sat mat, 0.12 = thay ca nguoi.
+    # Khoang cach hai mat / chieu ngang khung. Tham so quyet dinh khung lay rong
+    # hay hep: 0.55 = chan dung sat mat, 0.12 = thay ca nguoi va boi canh.
     "face_frac": 0.12,
     "eye_y": 0.33,        # vi tri mat theo chieu doc
     "anchor_x": 0.5,      # vi tri mat theo chieu ngang
     "fill": "crop",       # 'crop' phu kin khung | 'blur' tron anh + nen mo
     "level": True,        # xoay cho hai mat nam ngang
+    # Video hai nguoi: khoang cach GIUA HAI NGUOI tinh theo chieu ngang khung.
+    # Lon hon face_frac nhieu vi phai chua ca hai khuon mat, khong phai mot.
+    "pair_frac": 0.30,
+
+    # ---------------- cach ke ----------------
+    "mode": "story",      # 'story' | 'flip'
+    "out_fps": 24,        # fps that cua video khi mode='story'
+    "motion": "subtle",   # none | subtle | normal | strong (zoom Ken Burns)
+    "title": True,        # the tieu de mo dau: ten + khoang nam
+    "title_text": None,   # de trong thi lay ten nguoi cua du an
+    "title_seconds": 2.4,
+    "chapter_card": True, # hien nhan chuong khi sang chuong moi
+    "card_seconds": 1.8,
+    "birth_year": None,   # co thi nhan chuong hien them "N tuoi"
+    "arc": True,          # mo dau va ket thuc cham hon mot chut
+    "intro_s": 0.8,       # mo man tu den
+    "outro_s": 1.6,       # giu them roi dong man ve den
+    "label": "none",      # nhan goc duoi: none|year|month|date
+
+    # ---------------- tieng cua doan video ----------------
+    # Tieng that cua tung doan, dat dung vi tri tren dong thoi gian. Anh tinh
+    # khong co tieng nen giua cac doan la im lang — de khong bi giat cuc, tieng
+    # duoc BAT DAU SOM va KEO DAI hon phan hinh (J-cut / L-cut trong dung phim).
+    "audio": True,
+    "audio_lead": 0.5,        # tieng vao truoc hinh bao nhieu giay
+    "audio_tail": 0.8,        # tieng con lai sau khi hinh da cat
+    "audio_fade_in": 0.35,
+    "audio_fade_out": 0.6,
+    "audio_gain": 0.0,        # dB
+    "audio_normalize": True,  # can muc giua cac doan, roi chan dinh
+
+    # Ke thua tu filters cua du an de so anh va thoi luong khop nhau.
+    # Gui len o day thi ghi de, nhung chi doi NHIP chu khong doi anh da chon.
+    "pace": None, "target_seconds": None, "xfade": None,
+
+    # ---------------- rieng mode='flip' ----------------
     "fps": 6,             # so anh moi giay
     "smooth": "blend",    # 'none' | 'blend'
-    "out_fps": 30,        # chi dung khi smooth='blend'
-    "label": "year",      # 'none' | 'year' | 'month' | 'date'
-    "eye_dx": None,       # cu, = face_frac/2. Nhan de client cu khong loi
+
+    # ---------------- encode ----------------
     "crf": 20,
     "preset": "medium",
     "jpeg_quality": 93,
+    "eye_dx": None,       # cu, = face_frac/2. Nhan de client cu khong loi
 }
+
+_INHERIT = ("pace", "target_seconds", "chapter_by", "max_per_chapter")
 
 _lock = threading.Lock()
 _running = {"id": None}
 
 
-def options(over=None):
+def options(over=None, filters=None):
+    """Gop tham so render. filters la bo nguong cua du an, dung de ke thua nhip.
+
+    Thu tu uu tien: over > filters > DEFAULT_OPTIONS. Nhip (pace/target_seconds)
+    phai lay tu filters vi so anh da duoc chon theo dung bo so do — doi pace o
+    day ma khong chon lai anh thi video dai/ngan khong nhu ky vong.
+    """
     o = dict(DEFAULT_OPTIONS)
+    for k in _INHERIT:
+        v = (filters or {}).get(k)
+        if v is not None:
+            o[k] = v
     over = over or {}
+    # Du an chon anh theo che do 'even' thi frame cua no khong co chuong va khong
+    # co anh diem nhan. Render bang che do story se ra mot chuoi shot dai bang
+    # nhau, khong nhan chuong — dung ky thuat nhung khong phai cai nguoi dung
+    # muon. Mac dinh theo dung che do da chon anh; ghi de duoc neu co y that.
+    if (filters or {}).get("mode") == "even" and over.get("mode") is None:
+        o["mode"] = "flip"
     for k, v in over.items():
-        if k in DEFAULT_OPTIONS and v is not None:
+        if (k in DEFAULT_OPTIONS or k in _INHERIT) and v is not None:
             o[k] = v
     # client cu chi biet eye_dx: interocular = 2*eye_dx*size -> face_frac
     if over.get("eye_dx") is not None and over.get("face_frac") is None:
@@ -64,46 +128,156 @@ def options(over=None):
         o["aspect"] = "4:3"
     o["out_w"], o["out_h"] = media.frame_size(o["size"], o["aspect"])
     o["face_frac"] = max(0.04, min(0.70, float(o["face_frac"])))
+    o["pair_frac"] = max(0.08, min(0.80, float(o["pair_frac"])))
     o["eye_y"] = max(0.15, min(0.80, float(o["eye_y"])))
     o["anchor_x"] = max(0.2, min(0.8, float(o["anchor_x"])))
     o["fill"] = o["fill"] if o["fill"] in ("crop", "blur") else "crop"
     o["level"] = bool(o["level"])
+    o["mode"] = o["mode"] if o["mode"] in ("story", "flip") else "story"
+    o["out_fps"] = max(12, min(60, int(o["out_fps"])))
+    o["motion"] = o["motion"] if o["motion"] in story.MOTION else "subtle"
+    o["title"] = bool(o["title"])
+    o["chapter_card"] = bool(o["chapter_card"])
+    o["arc"] = bool(o["arc"])
+    o["title_seconds"] = max(0.0, min(8.0, float(o["title_seconds"])))
+    o["card_seconds"] = max(0.4, min(6.0, float(o["card_seconds"])))
+    o["intro_s"] = max(0.0, min(4.0, float(o["intro_s"])))
+    o["outro_s"] = max(0.0, min(6.0, float(o["outro_s"])))
+    o["birth_year"] = _year(o["birth_year"])
+    o["audio"] = bool(o["audio"])
+    o["audio_lead"] = max(0.0, min(3.0, float(o["audio_lead"])))
+    o["audio_tail"] = max(0.0, min(4.0, float(o["audio_tail"])))
+    o["audio_fade_in"] = max(0.02, min(2.0, float(o["audio_fade_in"])))
+    o["audio_fade_out"] = max(0.02, min(3.0, float(o["audio_fade_out"])))
+    o["audio_gain"] = max(-24.0, min(12.0, float(o["audio_gain"])))
+    o["audio_normalize"] = bool(o["audio_normalize"])
     o["fps"] = max(1, min(30, int(o["fps"])))
-    o["out_fps"] = max(o["fps"], min(60, int(o["out_fps"])))
     o["crf"] = max(14, min(32, int(o["crf"])))
     if o["smooth"] not in ("none", "blend"):
         o["smooth"] = "none"
     if o["label"] not in ("none", "year", "month", "date"):
         o["label"] = "none"
+    if o["xfade"] is not None:
+        o["xfade"] = max(0.0, min(2.0, float(o["xfade"])))
+    if o["pace"] not in story.PACE:
+        o["pace"] = None
     return o
+
+
+def _year(v):
+    try:
+        y = int(v)
+    except (TypeError, ValueError):
+        return None
+    return y if 1900 <= y <= 2100 else None
 
 
 def current():
     return _running["id"]
 
 
+def preflight(fr, s):
+    """Bo cac shot khong doc duoc TRUOC khi tinh thoi luong.
+
+    Bat buoc voi mode='story': storyboard chot so frame cua tung shot, mot anh
+    chet giua duong se thanh mot doan dung hinh. Chi kiem duoc khi doc tu volume
+    (mot lan stat moi file, rat re); che do API thi phai chiu.
+
+    Doan video thi bat buoc phai co MEDIA_ROOT: khong tai ca file video qua HTTP
+    chi de lay 3 giay giua.
+    """
+    if not s.media_root:
+        ok = [r for r in fr if r.get("kind") != "clip"]
+        return ok, len(fr) - len(ok)
+    ok = []
+    for r in fr:
+        path = (r.get("video_path") if r.get("kind") == "clip"
+                else r.get("preview_path"))
+        if media.resolve(s.media_root, path):
+            ok.append(r)
+    return ok, len(fr) - len(ok)
+
+
 def start(project_id, over=None):
     """Tao render moi va chay o thread nen. Tra ve render_id."""
     s = get()
-    o = options(over)
+    p = projects.get_project(project_id)
+    o = options(over, p.get("filters"))
     fr = projects.frames(project_id)
     if not fr:
         raise ValueError("chua co frame nao duoc chon")
     if _running["id"] is not None:
         raise RuntimeError(f"dang render #{_running['id']}, doi xong roi chay tiep")
 
+    fr, n_missing = preflight(fr, s)
+    if len(fr) < 2:
+        raise ValueError(f"chi doc duoc {len(fr)} anh, can it nhat 2")
+    if o["title"] and not o["title_text"]:
+        o["title_text"] = p.get("person_name") or p.get("name") or ""
+
+    sb = None
+    if o["mode"] == "story":
+        sb = story.storyboard(fr, o)
+        n_total = sb["n_frames"]
+        note = {"n_shots": sb["n_shots"], "n_hero": sb["n_hero"],
+                "n_chapter": len(sb["chapters"]), "n_clip": sb["n_clip"],
+                "duration_s": sb["duration_s"], "fps": sb["fps"],
+                "text": textdraw.backend(), "n_missing": n_missing}
+    else:
+        n_total = len(fr)
+        note = {"n_shots": len(fr), "n_missing": n_missing}
+
     with rows() as (c, cur):
         cur.execute(
             f"INSERT INTO {s.table('render')}(project_id,status,options,n_total)"
             f" VALUES(%s,'queued',%s::jsonb,%s) RETURNING id",
-            (project_id, json.dumps(o), len(fr)))
+            (project_id, json.dumps({**_jsonable(o), "_story": note}), n_total))
         rid = cur.fetchone()["id"]
         c.commit()
 
-    th = threading.Thread(target=_worker, args=(rid, project_id, o, fr),
+    th = threading.Thread(target=_worker, args=(rid, o, fr, sb),
                           name=f"render-{rid}", daemon=True)
     th.start()
     return rid
+
+
+def _jsonable(o):
+    return {k: v for k, v in o.items()
+            if isinstance(v, (str, int, float, bool, type(None)))}
+
+
+def plan_for(project_id, over=None):
+    """Storyboard cho UI xem truoc, khong render gi. Tra ve tom tat + tung shot."""
+    s = get()
+    p = projects.get_project(project_id)
+    o = options(over, p.get("filters"))
+    fr = projects.frames(project_id)
+    if not fr:
+        return {"n_shots": 0, "n_frames": 0, "duration_s": 0.0, "chapters": [],
+                "shots": [], "mode": o["mode"]}
+    if o["mode"] != "story":
+        n = len(fr)
+        return {"mode": "flip", "n_shots": n, "n_frames": n, "fps": o["fps"],
+                "duration_s": round(n / float(o["fps"]), 2), "chapters": [],
+                "shots": []}
+    fr, n_missing = preflight(fr, s)
+    sb = story.storyboard(fr, o)
+    return {
+        "mode": "story", "n_shots": sb["n_shots"], "n_frames": sb["n_frames"],
+        "fps": sb["fps"], "duration_s": sb["duration_s"],
+        "n_hero": sb["n_hero"], "n_clip": sb["n_clip"], "n_missing": n_missing,
+        "pace": sb["pace"], "target_seconds": sb["target_seconds"],
+        "text_backend": textdraw.backend(),
+        "chapters": sb["chapters"],
+        "shots": [{"asset_id": sh["asset_id"], "fidx": sh["fidx"],
+                   "key": f"{sh['asset_id']}:{sh['fidx']}",
+                   "kind": sh["kind"],
+                   "taken_at": story.iso(sh["taken_at"]) if sh["taken_at"] else None,
+                   "chapter": sh["chapter"], "label": sh["label"],
+                   "hero": sh["hero"], "first_of_chapter": sh["first_of_chapter"],
+                   "seconds": round(sh["hold"] / sb["fps"], 2)}
+                  for sh in sb["shots"]],
+    }
 
 
 def status(render_id):
@@ -118,6 +292,7 @@ def status(render_id):
         if r.get(k) is not None:
             r[k] = r[k].isoformat()
     r["pct"] = round(100.0 * (r["n_done"] or 0) / max(1, r["n_total"] or 1), 1)
+    r["story"] = (r.get("options") or {}).get("_story")
     return r
 
 
@@ -133,7 +308,8 @@ def listing(project_id):
     s = get()
     with rows() as (c, cur):
         cur.execute(
-            f"SELECT id,status,n_total,n_done,duration_s,started_at,err"
+            f"SELECT id,status,n_total,n_done,duration_s,started_at,err,"
+            f"       options->>'mode' AS mode"
             f" FROM {s.table('render')} WHERE project_id=%s"
             f" ORDER BY id DESC LIMIT 20", (project_id,))
         out = []
@@ -145,42 +321,637 @@ def listing(project_id):
 
 
 # ---------------------------------------------------------------- worker
-def _worker(rid, project_id, o, fr):
+def _worker(rid, o, fr, sb):
     s = get()
     with _lock:
         _running["id"] = rid
     work = s.renders / str(rid)
-    frames_dir = work / "frames"
     try:
-        _set(rid, status="frames")
         shutil.rmtree(work, ignore_errors=True)
-        frames_dir.mkdir(parents=True, exist_ok=True)
-
-        n_ok = 0
-        t0 = time.time()
-        for r in fr:
-            if _aligned(r, frames_dir, n_ok + 1, o, s):
-                n_ok += 1
-                if n_ok % 10 == 0:
-                    _set(rid, n_done=n_ok)
-        _set(rid, n_done=n_ok)
-        if n_ok < 2:
-            raise RuntimeError(f"chi align duoc {n_ok} frame, khong du dung video")
-        print(f"[render {rid}] {n_ok} frame trong {time.time() - t0:.0f}s")
-
-        _set(rid, status="encoding")
+        work.mkdir(parents=True, exist_ok=True)
         out = work / "video.mp4"
-        dur = _encode(frames_dir, out, o, s)
+        t0 = time.time()
+        if o["mode"] == "story":
+            dur = _story(rid, sb, o, s, out, work)
+        else:
+            dur = _flip(rid, fr, o, s, out, work)
         _set(rid, status="done", video_path=str(out), duration_s=dur,
              finished=True)
-        print(f"[render {rid}] xong: {out} ({dur:.1f}s video)")
+        print(f"[render {rid}] xong sau {time.time() - t0:.0f}s: {out} "
+              f"({dur:.1f}s video)")
     except Exception as e:                                   # noqa: BLE001
         print(f"[render {rid}] LOI: {e}")
         _set(rid, status="error", err=str(e)[:500], finished=True)
     finally:
-        shutil.rmtree(frames_dir, ignore_errors=True)
+        shutil.rmtree(work / "frames", ignore_errors=True)
         with _lock:
             _running["id"] = None
+
+
+# ============================================================ che do story
+def _story(rid, sb, o, s, out, work):
+    """Sinh tung frame dau ra roi day vao stdin cua ffmpeg."""
+    shots = sb["shots"]
+    total = sb["n_frames"]
+    fps = sb["fps"]
+    w, h = o["out_w"], o["out_h"]
+    _set(rid, status="frames", n_total=total)
+
+    proc, log = _pipe(out, w, h, fps, o, s, work)
+    black = np.zeros((h, w, 3), np.uint8)
+    srcs, last, n_dead = {}, None, 0
+    b = 0
+    try:
+        for t in range(total):
+            while b + 1 < len(shots) and shots[b + 1]["start"] <= t:
+                b += 1
+                # shot b-1 con can cho chuyen canh, b-2 thi chac chan xong roi.
+                # Phai close() de xoa file tam khi anh tai qua API Immich.
+                old = srcs.pop(b - 2, None)
+                if old:
+                    old.close()
+            sh = shots[b]
+            local = t - sh["start"]
+            cur = _src(srcs, shots, b, o, s)
+            f = cur.frame(local)
+            owned = cur.fresh
+
+            # chong mo voi shot truoc o dau shot nay
+            if b > 0 and local < sh["xin"]:
+                prev = _src(srcs, shots, b - 1, o, s)
+                pf = prev.frame(shots[b]["start"] - shots[b - 1]["start"] + local)
+                if pf is not None and f is not None:
+                    a = (local + 1) / float(sh["xin"] + 1)
+                    f = cv2.addWeighted(pf, 1.0 - a, f, a, 0.0)
+                    owned = True
+                elif f is None:
+                    f, owned = pf, prev.fresh
+
+            if f is None:
+                n_dead += 1
+                f, owned = (last if last is not None else black), False
+
+            f, owned = _overlays(f, owned, sh, shots, local, o, sb, fps)
+            fade = _fade(t, total, sb)
+            if fade < 0.999:
+                f = media.dim(f if owned else f.copy(), fade)
+                owned = True
+            last = f
+            proc.stdin.write(np.ascontiguousarray(f, np.uint8).tobytes())
+
+            if t % 24 == 0:
+                _set(rid, n_done=t)
+        _set(rid, n_done=total)
+    except BrokenPipeError as e:
+        raise RuntimeError("ffmpeg dut giua duong: " + _tail(log)) from e
+    finally:
+        for sr in srcs.values():
+            sr.close()
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        # Timeout de mot ffmpeg treo khong giu luon ca render lock mai mai.
+        try:
+            rc = proc.wait(timeout=180)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            rc = proc.wait()
+        fh = getattr(proc, "log_fh", None)
+        if fh:
+            fh.close()
+    if rc != 0:
+        raise RuntimeError(f"ffmpeg loi (ma {rc}): " + _tail(log))
+    if not out.exists() or out.stat().st_size == 0:
+        raise RuntimeError("ffmpeg khong tao ra file")
+    if n_dead:
+        print(f"[render {rid}] {n_dead}/{total} frame phai lap lai frame truoc "
+              f"(khong doc duoc anh)")
+
+    _set(rid, status="audio")
+    withaudio = _mux_audio(out, shots, sb, o, s, work)
+    if withaudio is not None:
+        out.unlink(missing_ok=True)
+        withaudio.replace(out)
+    return total / float(fps)
+
+
+def _src(srcs, shots, i, o, s):
+    sr = srcs.get(i)
+    if sr is None:
+        sh = shots[i]
+        cls = _ClipSrc if sh.get("kind") == "clip" else _Src
+        sr = srcs[i] = cls(sh, o, s)
+    return sr
+
+
+class _Src:
+    """Mot anh nguon + phep neo cua no. Doc anh mot lan, dung cho ca shot.
+
+    fresh cho biet frame vua tra ve co phai bo dem rieng hay khong: khi shot
+    khong zoom, frame la MOT anh duy nhat duoc dung lai cho ca tram lan goi —
+    ve chu len do la lam ban het cac frame sau, nen phai copy truoc.
+    """
+
+    def __init__(self, sh, o, s):
+        self.sh, self.o, self.s = sh, o, s
+        self.img = self.tmp = self.kps = self.still = None
+        self.dead = False
+        self.opened = False
+        self.fresh = False
+        self.frac = o["face_frac"]
+        self.static = abs(sh["zoom_to"] - sh["zoom_from"]) < 1e-4
+
+    def _open(self):
+        self.opened = True
+        img, tmp = media.load(self.sh["asset_id"], self.sh["preview_path"], self.s)
+        if img is None:
+            self.dead = True
+            return
+        self.img, self.tmp = img, tmp
+        hh, ww = img.shape[:2]
+        self.kps = media.kps_from_blob(self.sh["kps"], ww, hh)
+        if self.kps is None:
+            self.dead = True
+            return
+        # Anh co ca nguoi thu hai -> neo theo CA HAI khuon mat. Anh chi co mot
+        # nguoi trong nhom van neo binh thuong theo mot mat, khong bi loai.
+        k2 = media.kps_from_blob(self.sh.get("kps2"), ww, hh)
+        if k2 is not None:
+            pair = media.pair_kps(self.kps, k2)
+            if pair is not None:
+                self.kps, self.frac = pair, self.o["pair_frac"]
+
+    def frame(self, idx):
+        if not self.opened:
+            self._open()
+        if self.dead:
+            self.fresh = False
+            return None
+        if self.static and self.still is not None:
+            self.fresh = False
+            return self.still
+        o = self.o
+        z0, z1 = self.sh["zoom_from"], self.sh["zoom_to"]
+        ph = story.smoothstep(idx / max(1, self.sh["vis"] - 1))
+        f = media.anchor_frame(
+            self.img, self.kps, o["out_w"], o["out_h"],
+            face_frac=self.frac, anchor_x=o["anchor_x"], eye_y=o["eye_y"],
+            level=o["level"], fill=o["fill"], zoom=z0 + (z1 - z0) * ph,
+            interp=cv2.INTER_LANCZOS4 if self.static else cv2.INTER_LINEAR)
+        if f is None:
+            self.dead = True
+            self.fresh = False
+            return None
+        if o["label"] != "none":
+            textdraw.corner(f, _stamp(self.sh["taken_at"], o["label"]), 0.9)
+        if self.static:
+            self.still = f
+            self.fresh = False
+            return f
+        self.fresh = True
+        return f
+
+    def close(self):
+        media.release(self.tmp)
+        self.img = self.still = self.tmp = None
+
+
+class _ClipSrc:
+    """Mot DOAN VIDEO: doc frame that tu file, neo theo duong di cua khuon mat.
+
+    Khac han _Src o mot diem ban chat: khuon mat DI CHUYEN trong suot doan. Neo
+    vao mot vi tri co dinh lay tu mot moc thi den cuoi doan mat da troi ra khoi
+    cho. Vi vay indexer luu ca 'track' — kps o tung moc lay mau — va o day noi
+    suy tuyen tinh giua hai moc gan nhat.
+
+    Ket qua: khuon mat van dung mot cho xuyen suot ca doan video, giong nhu voi
+    anh tinh. Nguoi trong khung cu dong, con khung thi khong.
+
+    Doc tuan tu, khong seek tung frame: seek lai tu keyframe cho moi frame se
+    cham gap nhieu lan. Chi seek MOT lan den dau doan.
+    """
+
+    def __init__(self, sh, o, s):
+        self.sh, self.o, self.s = sh, o, s
+        self.cap = None
+        self.dead = False
+        self.opened = False
+        self.fresh = True            # moi frame la mot anh moi, khong dung lai
+        self.img = None
+        self.img_ms = -1.0
+        self.track = _track(sh.get("track"))
+        self.t0 = float(sh.get("t_start_ms") or 0)
+        self.t1 = float(sh.get("t_end_ms") or 0)
+        self.fps = max(1, int(o["out_fps"]))
+
+    def _open(self):
+        self.opened = True
+        if self.track is None or self.track.shape[0] < 1:
+            self.dead = True
+            return
+        path = media.resolve(self.s.media_root, self.sh.get("video_path"))
+        if path is None:
+            self.dead = True
+            return
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            cap.release()
+            self.dead = True
+            return
+        # Seek mot lan den dau doan. Lui lai mot chut vi voi codec co B-frame,
+        # POS_MSEC lang o keyframe gan nhat truoc do — doc tiep vai frame la dung.
+        if self.t0 > 40:
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, self.t0 - 40.0))
+        self.cap = cap
+        self._advance(self.t0)
+
+    def _advance(self, want_ms):
+        """Doc tiep cho den frame co moc >= want_ms. Het video thi giu frame cuoi."""
+        cap = self.cap
+        if cap is None:
+            return
+        guard = 0
+        while self.img_ms < want_ms - 1.0 and guard < 4000:
+            guard += 1
+            ok, img = cap.read()
+            if not ok or img is None:
+                break
+            pos = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+            self.img = img
+            self.img_ms = pos if pos > 0 else (self.img_ms + 33.0)
+
+    def frame(self, idx):
+        if not self.opened:
+            self._open()
+        if self.dead:
+            self.fresh = False
+            return None
+        want = self.t0 + idx * 1000.0 / self.fps
+        self._advance(min(want, self.t1 if self.t1 > self.t0 else want))
+        if self.img is None:
+            self.dead = True
+            self.fresh = False
+            return None
+        o = self.o
+        hh, ww = self.img.shape[:2]
+        kps = self._kps_at(want, ww, hh)
+        if kps is None:
+            self.dead = True
+            self.fresh = False
+            return None
+        f = media.anchor_frame(
+            self.img, kps, o["out_w"], o["out_h"], face_frac=o["face_frac"],
+            anchor_x=o["anchor_x"], eye_y=o["eye_y"], level=o["level"],
+            fill=o["fill"], interp=cv2.INTER_LINEAR)
+        if f is None:
+            self.dead = True
+            self.fresh = False
+            return None
+        if o["label"] != "none":
+            textdraw.corner(f, _stamp(self.sh["taken_at"], o["label"]), 0.9)
+        self.fresh = True
+        return f
+
+    def _kps_at(self, t_ms, w, h):
+        """Noi suy 5 diem tai thoi diem t_ms tu track, roi doi ve pixel."""
+        tr = self.track
+        if tr is None or tr.shape[0] == 0:
+            return None
+        ts = tr[:, 0] * 1000.0
+        t = float(t_ms)
+        if tr.shape[0] == 1 or t <= ts[0]:
+            k = tr[0, 1:]
+        elif t >= ts[-1]:
+            k = tr[-1, 1:]
+        else:
+            j = int(np.searchsorted(ts, t))
+            j = max(1, min(tr.shape[0] - 1, j))
+            span = max(1e-6, ts[j] - ts[j - 1])
+            u = (t - ts[j - 1]) / span
+            k = tr[j - 1, 1:] * (1.0 - u) + tr[j, 1:] * u
+        out = np.asarray(k, np.float32).reshape(5, 2).copy()
+        out[:, 0] *= float(w)
+        out[:, 1] *= float(h)
+        return out
+
+    def close(self):
+        if self.cap is not None:
+            self.cap.release()
+        self.cap = None
+        self.img = None
+
+
+def _track(blob):
+    """float32[n][11] = t_giay + 5 cap (x,y) chuan hoa. Do indexer ghi."""
+    if not blob:
+        return None
+    a = np.frombuffer(blob, np.float32)
+    if a.size < 11 or a.size % 11:
+        return None
+    return a.reshape(-1, 11)
+
+
+def _overlays(f, owned, sh, shots, local, o, sb, fps):
+    """The tieu de va nhan chuong, mo dan len roi tan di.
+
+    Chi ve khi CO CHU that. Khong kiem thi mot du an che do 'even' render bang
+    che do story se ra mot dai toi o day khung ma khong co chu nao trong do —
+    vi frame cua no khong co nhan chuong.
+    """
+    jobs = []
+    if o["title"] and sh is shots[0] and sb["f_title"] > 0:
+        lines = _title_lines(o, shots)
+        a = _ramp(local, 0, sb["f_title"], fps, 0.5, 0.6) if lines else 0.0
+        if a > 0:
+            jobs.append((a, 0.70, lines, 0.40))
+    if o["chapter_card"] and sh["first_of_chapter"] and sh["label"]:
+        start = sb["f_title"] if sh is shots[0] else 0
+        span = min(int(round(o["card_seconds"] * fps)), max(1, sh["hold"] - start))
+        a = _ramp(local, start, span, fps, 0.35, 0.45)
+        if a > 0:
+            jobs.append((a, 0.855, _card_lines(sh, o), 0.30))
+    if not jobs:
+        return f, owned
+    if not owned:
+        f = f.copy()
+        owned = True
+    for a, y, lines, sc in jobs:
+        textdraw.scrim(f, height=sc, strength=0.62 * a)
+        px = int(min(f.shape[1], f.shape[0]) * (0.085 if y < 0.8 else 0.055))
+        textdraw.block(f, lines, y_frac=y, px=px, alpha=a)
+    return f, owned
+
+
+def _title_lines(o, shots):
+    """[] neu khong co gi de viet — de _overlays biet ma bo qua ca lop toi."""
+    name = (o.get("title_text") or "").strip()
+    y0 = story.dt(shots[0]["taken_at"]).year if shots[0]["taken_at"] else None
+    y1 = story.dt(shots[-1]["taken_at"]).year if shots[-1]["taken_at"] else None
+    span = f"{y0}–{y1}" if y0 and y1 and y0 != y1 else (str(y0) if y0 else "")
+    if name:
+        return [(name, 1.0), (span, 0.52)]
+    return [(span, 1.0)] if span else []
+
+
+def _card_lines(sh, o):
+    lines = [(sh["label"], 1.0)]
+    by = o.get("birth_year")
+    if by and sh["taken_at"]:
+        age = story.dt(sh["taken_at"]).year - by
+        if 0 <= age <= 120:
+            lines.append((f"{age} tuổi", 0.68))
+    return lines
+
+
+def _ramp(local, start, length, fps, fin=0.35, fout=0.45):
+    """Alpha hinh thang: len trong fin giay, giu, xuong trong fout giay."""
+    x = local - start
+    if length <= 0 or x < 0 or x >= length:
+        return 0.0
+    up = (x + 1) / max(1.0, round(fin * fps))
+    down = (length - x) / max(1.0, round(fout * fps))
+    return max(0.0, min(1.0, up, down))
+
+
+def _fade(t, total, sb):
+    """He so sang cho mo man / dong man."""
+    k = 1.0
+    if sb["fade_in"]:
+        k = min(k, (t + 1) / float(sb["fade_in"]))
+    if sb["fade_out"]:
+        k = min(k, (total - t) / float(sb["fade_out"]))
+    return max(0.0, min(1.0, k))
+
+
+def _stamp(taken_at, kind):
+    if taken_at is None:
+        return ""
+    s = taken_at.isoformat() if hasattr(taken_at, "isoformat") else str(taken_at)
+    return {"year": s[:4], "month": s[:7], "date": s[:10]}.get(kind, "")
+
+
+# ============================================================== tieng
+def audio_plan(shots, sb, o, s):
+    """Xep tieng cua tung doan len dong thoi gian cua video ra.
+
+    Tra ve list dict, moi cai la mot nguon tieng: file, cat tu dau den dau, dat
+    o giay thu bao nhieu, fade bao lau. Tach ra khoi viec goi ffmpeg de test duoc
+    ma khong can file video nao.
+
+    Hai chi tiet lam nen cam giac "song lai khoanh khac" thay vi "chen tieng":
+
+    1. Tieng vao TRUOC hinh (audio_lead) va con lai SAU khi hinh da cat
+       (audio_tail). Trong dung phim day la J-cut va L-cut: tai nghe thay khong
+       gian moi truoc khi mat thay no, va khong gian do khong tat dot ngot cung
+       luc voi hinh. Bo hai cai nay thi moi doan thanh mot khoi tieng bi dong mo
+       cua — dung la 'chen tieng'.
+
+    2. Doan dau tien khong the vao truoc giay 0, nen lead bi cat theo dung cho no
+       con: lead_eff = min(lead, vi tri cua doan). Khong lam vay thi delay am,
+       va tieng se lech voi hinh suot ca doan.
+    """
+    fps = float(sb["fps"])
+    total = sb["n_frames"] / fps
+    out = []
+    for sh in shots:
+        if sh.get("kind") != "clip" or not sh.get("video_path"):
+            continue
+        path = media.resolve(s.media_root, sh["video_path"])
+        if path is None:
+            continue
+        pos = sh["start"] / fps                      # hinh xuat hien o giay nay
+        t0 = float(sh["t_start_ms"] or 0) / 1000.0
+        t1 = float(sh["t_end_ms"] or 0) / 1000.0
+        if t1 <= t0:
+            continue
+        lead = min(float(o["audio_lead"]), pos, t0)
+        tail = float(o["audio_tail"])
+        src_dur = float(sh.get("src_dur_ms") or 0) / 1000.0
+        a0 = t0 - lead
+        a1 = t1 + tail
+        if src_dur > 0:
+            a1 = min(a1, src_dur)
+        a1 = min(a1, t1 + max(0.0, total - (pos + (t1 - t0))))
+        dur = a1 - a0
+        if dur < 0.25:
+            continue
+        fin = min(float(o["audio_fade_in"]), dur / 2.0)
+        fout = min(float(o["audio_fade_out"]), dur / 2.0)
+        out.append({
+            "path": str(path), "src_start": round(a0, 3), "dur": round(dur, 3),
+            "at": round(pos - lead, 3), "fade_in": round(fin, 3),
+            "fade_out": round(fout, 3),
+        })
+    return out
+
+
+def audio_filter(plan, o, total):
+    """Chuoi filter_complex cho ffmpeg + nhan cua dau ra. ('', '') neu khong co."""
+    if not plan:
+        return "", ""
+    parts, labels = [], []
+    for k, a in enumerate(plan, start=1):
+        lab = f"a{k}"
+        delay = int(round(a["at"] * 1000))
+        # aformat truoc moi thu: cac clip co the khac sample rate va so kenh, ma
+        # amix doi tat ca giong nhau — khong chuan hoa thi ffmpeg bao loi kho hieu.
+        chain = (f"[{k}:a]aformat=sample_fmts=fltp:sample_rates=48000:"
+                 f"channel_layouts=stereo,"
+                 f"afade=t=in:st=0:d={a['fade_in']:.2f},"
+                 f"afade=t=out:st={max(0.0, a['dur'] - a['fade_out']):.2f}:"
+                 f"d={a['fade_out']:.2f}")
+        if delay > 0:
+            chain += f",adelay={delay}|{delay}"
+        parts.append(chain + f"[{lab}]")
+        labels.append(f"[{lab}]")
+
+    last = labels[0][1:-1]
+    if len(labels) > 1:
+        # normalize=0: amix mac dinh chia am luong cho so input, nen 8 doan thi
+        # moi doan chi con 1/8 — nghe nhu thi tham. O day cac doan gan nhu khong
+        # chong nhau nen cong thang lai la dung, va alimiter chan dinh phia sau.
+        parts.append("".join(labels)
+                     + f"amix=inputs={len(labels)}:normalize=0"
+                       f":dropout_transition=0[mx]")
+        last = "mx"
+    tail = []
+    if o["audio_normalize"]:
+        # dynaudnorm can muc giua cac doan quay o cac dieu kien khac nhau — day
+        # la thu lam chuoi tieng nghe lien mach thay vi to nho giat cuc.
+        tail.append("dynaudnorm=f=250:g=7:p=0.9")
+    if abs(float(o["audio_gain"])) > 0.01:
+        tail.append(f"volume={float(o['audio_gain']):.2f}dB")
+    tail.append("alimiter=limit=0.95")
+    # apad + do dai chinh xac: doan cuoi thuong ket thuc truoc khi video het,
+    # thieu apad thi track tieng ngan hon track hinh va mot so may phat bo qua
+    # luon phan cuoi.
+    tail.append(f"apad=whole_dur={total:.3f}")
+    parts.append(f"[{last}]" + ",".join(tail) + "[aout]")
+    return ";".join(parts), "[aout]"
+
+
+def _mux_audio(video, shots, sb, o, s, work):
+    """Ghep tieng vao video da encode. Tra ve Path moi, hoac None neu bo qua.
+
+    Lam thanh MOT LUOT RIENG sau khi encode xong, khong tron vao pipe rawvideo.
+    Ly do: video duoc copy nguyen (-c:v copy) nen re, va neu buoc tieng that bai
+    vi bat ky ly do gi thi van con nguyen video im lang — thay vi mat ca video.
+    """
+    if not o["audio"]:
+        return None
+    plan = [a for a in audio_plan(shots, sb, o, s)
+            if _has_audio(a["path"], s)]
+    if not plan:
+        return None
+    total = sb["n_frames"] / float(sb["fps"])
+    fc, out_lab = audio_filter(plan, o, total)
+    if not fc:
+        return None
+
+    dst = work / "video_audio.mp4"
+    cmd = [s.ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",
+           "-i", str(video)]
+    for a in plan:
+        cmd += ["-ss", f"{a['src_start']:.3f}", "-t", f"{a['dur']:.3f}",
+                "-vn", "-i", a["path"]]
+    cmd += ["-filter_complex", fc,
+            "-map", "0:v", "-map", out_lab,
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2",
+            "-t", f"{total:.3f}", "-movflags", "+faststart", str(dst)]
+    log = work / "ffmpeg-audio.log"
+    print(f"[render] ghep tieng tu {len(plan)} doan")
+    with open(log, "wb") as fh:
+        rc = subprocess.run(cmd, stdout=fh, stderr=fh).returncode
+    if rc != 0 or not dst.exists() or dst.stat().st_size == 0:
+        print("[render] ghep tieng that bai, giu video im lang: " + _tail(log))
+        return None
+    return dst
+
+
+def _has_audio(path, s):
+    """Clip khong co track tieng thi phai bo ra: mot input khong co audio se lam
+    ca filter_complex that bai, keo theo mat tieng cua tat ca doan khac."""
+    try:
+        p = subprocess.run(
+            [s.ffprobe, "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=20)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False                     # khong co ffprobe -> khong doan bua
+    return p.returncode == 0 and "audio" in (p.stdout or "")
+
+
+def _pipe(out, w, h, fps, o, s, work):
+    """ffmpeg doc rawvideo tu stdin. stderr ra file de KHONG BAO GIO tac pipe.
+
+    Neu de stderr=PIPE ma khong doc, ffmpeg noi nhieu la day day bo dem cua OS
+    roi treo, con minh thi dang cho ghi frame — deadlock ca hai dau.
+    """
+    log = work / "ffmpeg.log"
+    cmd = [
+        s.ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",
+        "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
+        "-r", str(fps), "-i", "pipe:0",
+        "-an", "-c:v", "libx264", "-preset", o["preset"], "-crf", str(o["crf"]),
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-threads", str(max(1, s.ffmpeg_threads)), str(out),
+    ]
+    print("[render] " + " ".join(cmd))
+    fh = open(log, "wb")
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=fh, stderr=fh,
+                            bufsize=0)
+    proc.log_fh = fh              # giu tham chieu de dong tu te sau khi xong
+    return proc, log
+
+
+def _tail(log, n=400):
+    try:
+        return Path(log).read_text("utf-8", "replace")[-n:]
+    except OSError:
+        return "(khong doc duoc log ffmpeg)"
+
+
+# ============================================================= che do flip
+def _flip(rid, fr, o, s, out, work):
+    """Cach cu: align tung anh ra jpg roi cho ffmpeg ghep chuoi anh."""
+    frames_dir = work / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    # Che do flip la chuoi anh tinh, khong co cho cho doan video. Bo qua cho ro
+    # rang thay vi de _aligned() tra False mot cach im lang.
+    fr = [r for r in fr if r.get("kind") != "clip"]
+    _set(rid, status="frames", n_total=len(fr))
+    n_ok = 0
+    for r in fr:
+        if _aligned(r, frames_dir, n_ok + 1, o, s):
+            n_ok += 1
+            if n_ok % 10 == 0:
+                _set(rid, n_done=n_ok)
+    _set(rid, n_done=n_ok)
+    if n_ok < 2:
+        raise RuntimeError(f"chi align duoc {n_ok} frame, khong du dung video")
+
+    _set(rid, status="encoding")
+    vf = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
+    if o["smooth"] == "blend":
+        # framerate= noi suy co pha tron, re hon minterpolate nhieu lan
+        vf.insert(0, f"framerate=fps={max(o['fps'] * 4, 24)}")
+    cmd = [
+        s.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-framerate", str(o["fps"]), "-start_number", "1",
+        "-i", str(frames_dir / "f_%05d.jpg"),
+        "-vf", ",".join(vf),
+        "-c:v", "libx264", "-preset", o["preset"], "-crf", str(o["crf"]),
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-threads", str(max(1, s.ffmpeg_threads)), "-an", str(out),
+    ]
+    print("[render] " + " ".join(cmd))
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError("ffmpeg loi: " + (p.stderr or "")[-400:])
+    if not out.exists() or out.stat().st_size == 0:
+        raise RuntimeError("ffmpeg khong tao ra file")
+    return n_ok / float(o["fps"])
 
 
 def _aligned(row, out_dir, n, o, s):
@@ -192,63 +963,26 @@ def _aligned(row, out_dir, n, o, s):
         kps = media.kps_from_blob(row["kps"], w, h)
         if kps is None:
             return False
+        frac = o["face_frac"]
+        k2 = media.kps_from_blob(row.get("kps2"), w, h)
+        if k2 is not None:
+            pair = media.pair_kps(kps, k2)
+            if pair is not None:
+                kps, frac = pair, o["pair_frac"]
         frame = media.anchor_frame(
-            img, kps, o["out_w"], o["out_h"], face_frac=o["face_frac"],
+            img, kps, o["out_w"], o["out_h"], face_frac=frac,
             anchor_x=o["anchor_x"], eye_y=o["eye_y"], level=o["level"],
             fill=o["fill"])
         if frame is None:
             return False
         if o["label"] != "none":
-            _label(frame, row["taken_at"], o)
+            textdraw.corner(frame, _stamp(row["taken_at"], o["label"]), 0.9)
         return media.imwrite(out_dir / f"f_{n:05d}.jpg", frame, o["jpeg_quality"])
     finally:
         media.release(tmp)
 
 
-def _label(frame, taken_at, o):
-    """Nhan thoi gian goc duoi. Chi ASCII nen HERSHEY du dung, khong can font."""
-    if taken_at is None:
-        return
-    iso = taken_at.isoformat() if hasattr(taken_at, "isoformat") else str(taken_at)
-    text = {"year": iso[:4], "month": iso[:7], "date": iso[:10]}[o["label"]]
-    fh, fw = frame.shape[:2]
-    scale = min(fw, fh) / 720.0 * 1.1
-    th = max(1, int(round(2 * scale)))
-    (tw, tht), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, th)
-    x = int((fw - tw) / 2)
-    y = int(fh - max(12, fh * 0.045))
-    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale,
-                (0, 0, 0), th + 3, cv2.LINE_AA)
-    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale,
-                (255, 255, 255), th, cv2.LINE_AA)
-
-
-def _encode(frames_dir, out, o, s):
-    n = len(list(frames_dir.glob("f_*.jpg")))
-    vf = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
-    if o["smooth"] == "blend" and o["out_fps"] > o["fps"]:
-        # framerate= noi suy co pha tron, re hon minterpolate nhieu lan
-        vf.insert(0, f"framerate=fps={o['out_fps']}")
-    cmd = [
-        s.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-framerate", str(o["fps"]),
-        "-start_number", "1",
-        "-i", str(frames_dir / "f_%05d.jpg"),
-        "-vf", ",".join(vf),
-        "-c:v", "libx264", "-preset", o["preset"], "-crf", str(o["crf"]),
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        "-threads", str(max(1, s.ffmpeg_threads)),
-        "-an", str(out),
-    ]
-    print("[render] " + " ".join(cmd))
-    p = subprocess.run(cmd, capture_output=True, text=True)
-    if p.returncode != 0:
-        raise RuntimeError("ffmpeg loi: " + (p.stderr or "")[-400:])
-    if not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("ffmpeg khong tao ra file")
-    return n / float(o["fps"])
-
-
+# ================================================================= chung
 def _set(rid, finished=False, **kw):
     s = get()
     sets, vals = [], []

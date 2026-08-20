@@ -11,13 +11,19 @@
 <header>
   <h1>Video hành trình một người</h1>
   <nav id="steps">
-    <button data-step="1" class="on">1. Chọn người</button>
-    <button data-step="2" disabled>2. Ảnh tự chọn</button>
-    <button data-step="3" disabled>3. Tinh chỉnh</button>
-    <button data-step="4" disabled>4. Dựng video</button>
+    <button data-step="1" class="on">Chọn người</button>
+    <button data-step="5" disabled>Video</button>
+    <!-- Ba buoc nay CHI hien o che do chuyen gia (CSS an theo body.expert).
+         Duong mac dinh la: chon nguoi -> co video, khong setup gi. -->
+    <button data-step="2" class="adv" disabled>Ảnh đã chọn</button>
+    <button data-step="3" class="adv" disabled>Ngưỡng lọc</button>
+    <button data-step="4" class="adv" disabled>Thông số dựng</button>
     <!-- Khong co data-step: step() bo qua nen luon bam duoc, va khong tham gia
          vao logic mo dan cac buoc. -->
     <button id="navStats" class="aside">Thống kê</button>
+    <label class="expertToggle" title="Hiện các bước tinh chỉnh từng khâu">
+      <input type="checkbox" id="expert"> Chuyên gia
+    </label>
   </nav>
   <div id="health" class="muted"></div>
 </header>
@@ -52,18 +58,58 @@
   <!-- Thanh nay phai nam TRONG section s1: no position:fixed, de ngoai thi
        .step{display:none} khong che duoc va no noi tren ca 4 buoc. -->
   <div id="pickBar" class="pickbar hide">
-    <div class="pi">
-      <div id="pickInfo"></div>
-      <div id="pickNames" class="muted"></div>
+    <div id="subjRow" class="subjrow hide">
+      <span class="muted">Video của:</span>
+      <span id="subjChips"></span>
+      <label class="muted chk"><input type="checkbox" id="together">
+        chỉ ảnh có mặt đủ tất cả</label>
     </div>
-    <label class="muted">Giống nhau ≥ <output id="o_minSim"></output>
-      <input type="range" id="minSim" min="0.15" max="0.8" step="0.05" value="0.3">
-    </label>
-    <button id="findSim">Tìm cụm cùng người</button>
-    <button id="clearPick">Bỏ chọn</button>
-    <button id="mkAdvanced">Tinh chỉnh từng bước →</button>
-    <button id="mkVideo" class="primary">Tạo video ngay</button>
+    <div class="pbmain">
+      <div class="pi">
+        <div id="pickInfo"></div>
+        <div id="pickNames" class="muted"></div>
+      </div>
+      <label class="muted">Từ ngày <input type="date" id="dFrom"></label>
+      <label class="muted">đến <input type="date" id="dTo"></label>
+      <label class="muted adv">Giống nhau ≥ <output id="o_minSim"></output>
+        <input type="range" id="minSim" min="0.15" max="0.8" step="0.05" value="0.3">
+      </label>
+      <button id="findSim">Tìm cụm cùng người</button>
+      <button id="addSubject">+ Thêm người nữa</button>
+      <button id="clearPick">Bỏ chọn</button>
+      <button id="mkAdvanced" class="adv">Tinh chỉnh từng bước →</button>
+      <button id="mkVideo" class="primary">Tạo video</button>
+    </div>
   </div>
+</section>
+
+<!-- ======================================================= video (kết quả) -->
+<!-- Đường mặc định dừng ở đây: không có thanh trượt nào, không có ngưỡng nào.
+     Ai muốn can thiệp thì bật Chuyên gia. -->
+<section id="s5" class="step">
+  <div id="outHead"></div>
+  <div id="renderState"></div>
+  <video id="player" controls class="hide"></video>
+  <div class="bar" id="outBar">
+    <button id="shorter">Ngắn hơn</button>
+    <button id="longer">Dài hơn</button>
+    <!-- Phai co DU cac lua chon nhu #r_aspect ben buoc 4: hai o nay dong bo gia
+         tri cho nhau, thieu mot option la gan value khong khop -> ve rong. -->
+    <label class="muted">Khung
+      <select id="o_aspect">
+        <option value="4:3" selected>4:3 ngang</option>
+        <option value="3:2">3:2 ngang</option>
+        <option value="16:9">16:9 ngang</option>
+        <option value="1:1">1:1 vuông</option>
+        <option value="3:4">3:4 dọc</option>
+        <option value="9:16">9:16 dọc (điện thoại)</option>
+      </select></label>
+    <button id="reRender" class="primary">Dựng lại</button>
+    <button id="toExpert">Tinh chỉnh chuyên gia →</button>
+  </div>
+  <div id="outStory"></div>
+  <h3 class="adv">Lần dựng trước</h3>
+  <div id="renderList" class="adv"></div>
 </section>
 
 <!-- ===================================================== 2. ảnh tự chọn -->
@@ -85,6 +131,44 @@
 <section id="s3" class="step">
   <div class="split">
     <aside id="filters">
+      <h3>Cách kể</h3>
+      <label>Kiểu video
+        <select id="f_mode">
+          <option value="story" selected>Kể chuyện — chia chương, có điểm nhấn</option>
+          <option value="even">Rải đều — mỗi ảnh một frame (bản cũ)</option>
+        </select></label>
+      <div id="storyOpts">
+        <label class="chk"><input type="checkbox" id="f_auto_len" checked>
+          Tự suy độ dài từ dữ liệu</label>
+        <p class="muted">Mặc định độ dài là <b>kết quả</b>, không phải yêu cầu:
+          chương nào nhiều ảnh thì dày hơn, hành trình dài thì nhiều chương hơn.
+          Bỏ tích nếu muốn ép một con số.</p>
+        <label id="lenWrap" class="off">Độ dài mong muốn
+          <output id="o_target_seconds"></output> giây
+          <input type="range" id="f_target_seconds" min="15" max="240" step="5"></label>
+        <label>Nhịp kể
+          <select id="f_pace">
+            <option value="slow">Chậm — dừng lại ngắm</option>
+            <option value="normal" selected>Vừa</option>
+            <option value="quick">Nhanh</option>
+            <option value="snap">Rất nhanh</option>
+          </select></label>
+        <label>Một chương là
+          <select id="f_chapter_by">
+            <option value="auto" selected>Tự chọn theo độ dài hành trình</option>
+            <option value="years2">Hai năm</option>
+            <option value="year">Một năm</option>
+            <option value="half">Nửa năm</option>
+            <option value="quarter">Một quý</option>
+            <option value="month">Một tháng</option>
+          </select></label>
+        <label>Tối đa <output id="o_max_per_chapter"></output> ảnh mỗi chương
+          <input type="range" id="f_max_per_chapter" min="1" max="16" step="1"></label>
+        <p class="muted"><b>Số ảnh suy ra từ độ dài</b>, không phải ngược lại.
+          Mỗi chương luôn được ít nhất một ảnh để không mất giai đoạn nào, và
+          ảnh điểm cao nhất của chương được giữ lâu hơn làm điểm nhấn.</p>
+      </div>
+
       <h3>Pose đầu</h3>
       <label>Quay đầu tối đa <output id="o_max_yaw"></output>°
         <input type="range" id="f_max_yaw" min="5" max="60" step="1"></label>
@@ -103,6 +187,17 @@
       <label>Độ nét tối thiểu <output id="o_min_sharp"></output>
         <input type="range" id="f_min_sharp" min="0" max="400" step="10"></label>
 
+      <h3>Đoạn video</h3>
+      <label class="chk"><input type="checkbox" id="f_use_clips" checked>
+        Ghép cả đoạn video vào</label>
+      <p class="muted">Job indexer quét từng frame video, tìm người bạn chọn, rồi
+        cắt ra đoạn đẹp nhất. Mỗi chương có đoạn thì được giành một suất — đoạn
+        động đáng giá hơn một bức ảnh đẹp hơn nó một chút.</p>
+      <label>Độ rung tối đa <output id="o_max_clip_motion"></output>
+        <input type="range" id="f_max_clip_motion" min="0.5" max="8" step="0.1"></label>
+      <p class="muted">Tính bằng "chiều rộng khuôn mặt mỗi giây". Cao thì nhận cả
+        đoạn máy rung, thấp thì chỉ nhận đoạn thật êm.</p>
+
       <h3>Người khác trong ảnh</h3>
       <label class="chk"><input type="checkbox" id="f_allow_others">
         Chấp nhận ảnh có người khác</label>
@@ -119,11 +214,13 @@
           Nhận cả ảnh không detect được thân</label>
       </div>
 
-      <h3>Rải đều theo thời gian</h3>
-      <label>Mỗi <output id="o_bucket_days"></output> ngày lấy
-        <output id="o_per_bucket"></output> ảnh
-        <input type="range" id="f_bucket_days" min="7" max="365" step="1">
-        <input type="range" id="f_per_bucket" min="1" max="6" step="1"></label>
+      <div id="evenOpts" class="hide">
+        <h3>Rải đều theo thời gian</h3>
+        <label>Mỗi <output id="o_bucket_days"></output> ngày lấy
+          <output id="o_per_bucket"></output> ảnh
+          <input type="range" id="f_bucket_days" min="7" max="365" step="1">
+          <input type="range" id="f_per_bucket" min="1" max="6" step="1"></label>
+      </div>
 
       <div class="bar">
         <button id="apply" class="primary">Áp dụng</button>
@@ -137,6 +234,7 @@
         <div class="card ok"><b id="r_selected">0</b><span>vào video</span></div>
         <div class="card"><b id="r_rejected">0</b><span>bị loại</span></div>
       </div>
+      <div id="storyInfo"></div>
       <div id="reasons"></div>
       <div class="tabs">
         <button data-tab="sel" class="on">Ảnh vào video</button>
@@ -189,20 +287,70 @@
       <label class="chk"><input type="checkbox" id="r_level" checked>
         Xoay cho hai mắt nằm ngang</label>
 
-      <h3>Thông số video</h3>
-      <label>Ảnh mỗi giây <output id="o_fps"></output>
-        <input type="range" id="r_fps" min="1" max="24" step="1" value="6"></label>
-      <label>Làm mượt
-        <select id="r_smooth">
-          <option value="blend" selected>Pha trộn (mượt)</option>
-          <option value="none">Không (cắt cứng)</option>
+      <h3>Cách dựng</h3>
+      <label>Kiểu dựng
+        <select id="r_mode">
+          <option value="story" selected>Kể chuyện — chương, điểm nhấn, chuyển mờ</option>
+          <option value="flip">Rải đều — mỗi ảnh một frame (bản cũ)</option>
         </select></label>
-      <label>Nhãn thời gian
+
+      <div id="storyRender">
+        <label>Zoom chậm trong từng ảnh
+          <select id="r_motion">
+            <option value="none">Không — ảnh đứng yên</option>
+            <option value="subtle" selected>Nhẹ</option>
+            <option value="normal">Vừa</option>
+            <option value="strong">Mạnh</option>
+          </select></label>
+        <p class="muted">Zoom quanh điểm giữa hai mắt, nên khuôn mặt vẫn đứng
+          đúng một chỗ — chỉ bối cảnh rộng ra hẹp vào.</p>
+        <label class="chk"><input type="checkbox" id="r_title" checked>
+          Thẻ tiêu đề mở đầu (tên + khoảng năm)</label>
+        <label class="chk"><input type="checkbox" id="r_chapter_card" checked>
+          Hiện nhãn chương khi sang chương mới</label>
+        <label>Năm sinh — có thì nhãn chương hiện thêm tuổi
+          <input type="number" id="r_birth_year" min="1900" max="2100"
+                 placeholder="để trống thì bỏ qua"></label>
+        <label>fps đầu ra
+          <select id="r_out_fps">
+            <option value="24" selected>24</option>
+            <option value="25">25</option>
+            <option value="30">30</option>
+          </select></label>
+
+        <h3>Tiếng của đoạn video</h3>
+        <label class="chk"><input type="checkbox" id="r_audio" checked>
+          Giữ tiếng thật của từng đoạn</label>
+        <p class="muted">Tiếng vào <b>trước</b> hình và còn lại <b>sau</b> khi hình
+          đã cắt — tai nghe thấy không gian mới trước khi mắt thấy nó, và nó không
+          tắt đột ngột cùng lúc với hình. Giữa các đoạn là im lặng vì ảnh tĩnh
+          không có tiếng.</p>
+        <label>Tiếng vào trước hình <output id="o_audio_lead"></output> giây
+          <input type="range" id="r_audio_lead" min="0" max="2" step="0.1"
+                 value="0.5"></label>
+        <label>Tiếng còn lại sau hình <output id="o_audio_tail"></output> giây
+          <input type="range" id="r_audio_tail" min="0" max="3" step="0.1"
+                 value="0.8"></label>
+        <label class="chk"><input type="checkbox" id="r_audio_normalize" checked>
+          Cân mức tiếng giữa các đoạn</label>
+      </div>
+
+      <div id="flipRender" class="hide">
+        <label>Ảnh mỗi giây <output id="o_fps"></output>
+          <input type="range" id="r_fps" min="1" max="24" step="1" value="6"></label>
+        <label>Làm mượt
+          <select id="r_smooth">
+            <option value="blend" selected>Pha trộn (mượt)</option>
+            <option value="none">Không (cắt cứng)</option>
+          </select></label>
+      </div>
+
+      <label>Nhãn thời gian góc dưới
         <select id="r_label">
-          <option value="year" selected>Năm</option>
+          <option value="none" selected>Không — nhãn chương đã nói thời gian</option>
+          <option value="year">Năm</option>
           <option value="month">Năm-tháng</option>
           <option value="date">Ngày đầy đủ</option>
-          <option value="none">Không</option>
         </select></label>
       <div class="bar">
         <button id="render" class="primary">Dựng video</button>
@@ -210,14 +358,14 @@
       <p class="muted" id="renderEst"></p>
     </aside>
     <div>
+      <h3>Cấu trúc câu chuyện</h3>
+      <p class="muted">Tính bằng đúng thuật toán mà bước dựng dùng, nên thời
+        lượng dưới đây là con số thật chứ không phải ước lượng.</p>
+      <div id="sbInfo"></div>
       <h3>Xem trước khung — đúng như video sẽ ra</h3>
       <p class="muted">Ba ảnh cách xa nhau về thời gian. Khuôn mặt phải nằm
         cùng một chỗ ở cả ba, phần còn lại là bối cảnh bạn giữ được.</p>
       <div id="framePreview" class="fprev"></div>
-      <div id="renderState"></div>
-      <video id="player" controls class="hide"></video>
-      <h3>Lần dựng trước</h3>
-      <div id="renderList"></div>
     </div>
   </div>
 </section>

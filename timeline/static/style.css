@@ -186,3 +186,84 @@ table.runs td{padding:5px 10px 5px 0;border-bottom:1px solid var(--line);
 #toast div.bad{border-left-color:var(--bad)}
 
 @media(max-width:900px){.split{grid-template-columns:1fr}aside{position:static;max-height:none}}
+
+/* ---------------------------------------------------- che do ke chuyen ---
+   Anh vao video khong con la mot luoi phang: nhom theo CHUONG, va anh diem
+   nhan cua tung chuong duoc danh dau vi no chiem thoi luong gap doi tren video.
+*/
+.chapters{display:block}
+.chapHead{margin:16px 0 7px;padding-bottom:5px;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:8px}
+.chapHead b{font-size:14px;letter-spacing:.02em}
+.chapHead:first-child{margin-top:2px}
+
+.frame.hero{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.frame .heroTag{position:absolute;top:0;left:0;background:var(--acc);color:#fff;
+  font-size:9.5px;padding:1.5px 5px;border-radius:0 0 6px 0;letter-spacing:.02em}
+
+/* Thanh phan bo theo chuong. Dung lai hinh thuc cua .prow o trang thong ke de
+   khong sinh them mot ngon ngu thi giac thu hai trong cung mot app. */
+.chapbars{margin:12px 0 4px}
+.cb{display:grid;grid-template-columns:150px 1fr 92px;gap:11px;align-items:center;
+  margin:4px 0}
+.cbl{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.cbb{background:var(--panel);border:1px solid var(--line);border-radius:5px;
+  height:9px;overflow:hidden}
+.cbb i{display:block;height:100%;background:var(--acc);border-radius:4px;
+  transition:width .3s ease}
+.cbn{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px}
+.cbn em{color:var(--muted);font-style:normal;font-size:11px;margin-left:4px}
+@media(max-width:900px){.cb{grid-template-columns:1fr 78px}.cbb{grid-column:1/-1}}
+
+/* ------------------------------------------------- che do chuyen gia ---
+   Duong mac dinh: chon nguoi -> co video. Khong mot thanh truot nao. Moi thu
+   phuc tap deu mang class .adv va chi hien khi body.expert.
+   Lam bang CSS chu khong phai hai UI rieng: mot cay DOM, khong the lech nhau.
+*/
+.adv{display:none !important}
+body.expert .adv{display:revert !important}
+body.expert button.adv,
+body.expert label.adv{display:inline-flex !important}
+body.expert .bar button.adv{display:inline-block !important}
+
+.expertToggle{margin-left:auto;display:inline-flex;align-items:center;gap:6px;
+  color:var(--muted);font-size:12.5px;white-space:nowrap;cursor:pointer}
+.expertToggle input{accent-color:var(--acc)}
+
+/* Thanh truot bi vo hieu (do dai dang tu suy) — van thay de biet no ton tai */
+label.off{opacity:.4;pointer-events:none}
+
+/* ------------------------------------------------ nhieu nguoi trong video ---
+   "Video cua ong A voi ba B": moi nguoi la mot NHOM cum rieng, khong suy ra
+   duoc tu mot mo cum lan lon nen phai chot tung nguoi mot.
+*/
+.subjrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--line)}
+.pbmain{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+#subjChips{display:inline-flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--acc);color:#fff;border:0;border-radius:14px;
+  padding:4px 11px;font-size:12.5px;cursor:pointer}
+.chip em{font-style:normal;opacity:.75;margin:0 4px}
+.chip:hover{filter:brightness(1.15)}
+
+/* pickbar gio co hai hang (danh sach nguoi + cac nut) nen phai xep doc */
+.pickbar{flex-direction:column;align-items:stretch;gap:0}
+.subjrow label.chk,.pbmain label.chk{flex-direction:row;align-items:center;
+  gap:6px;min-width:0}
+
+/* trang ket qua */
+#outHead h3{margin:0 0 2px}
+#s5 video{max-width:900px}
+#outBar{align-items:center}
+
+/* ---------------------------------------------------------- doan video ---
+   Mot shot co the la anh tinh hoac mot DOAN VIDEO. Phai phan biet duoc bang mat
+   ngay tren luoi, vi doan video chiem thoi luong khac han va nguoi dung can biet
+   cai gi dang chiem 3 giay trong video 40 giay cua minh.
+*/
+.frame.clip{border-color:#b06cf0}
+.frame .clipTag{position:absolute;top:0;left:0;background:#b06cf0;color:#fff;
+  font-size:9.5px;padding:1.5px 5px;border-radius:0 0 6px 0;
+  font-variant-numeric:tabular-nums}
+.frame.clip.hero{box-shadow:0 0 0 1px #b06cf0 inset}

@@ -10,18 +10,67 @@ DDL = """
 CREATE TABLE IF NOT EXISTS {asset}(
   id            uuid PRIMARY KEY,
   filename      text,
+  kind          text DEFAULT 'image', -- 'image' | 'video'
   taken_at      timestamptz,          -- uu tien EXIF DateTimeOriginal
   date_src      text,                 -- 'exif' | 'local' | 'file'
   preview_path  text,                 -- duong dan trong container Immich
+  video_path    text,                 -- chi voi kind='video'
+  dur_ms        int,                  -- do dai video
   img_w         int,
   img_h         int,
   n_face        int  DEFAULT 0,
   n_body        int  DEFAULT 0,
+  n_clip        int  DEFAULT 0,       -- so doan da chon ra tu video nay
   face_state    smallint DEFAULT 0,   -- 0 cho | 1 xong | 2 co bbox+emb, cho landmark | -1 loi
   body_state    smallint DEFAULT 0,   -- 0 cho | 1 xong | -1 loi
+  clip_state    smallint DEFAULT 0,   -- 0 cho | 1 xong | -1 loi | 2 bo qua (khong phai video)
   err           text,
   seen_at       timestamptz DEFAULT now(),
   updated_at    timestamptz DEFAULT now()
+);
+
+-- Mot dong moi khuon mat PHAT HIEN DUOC tren moi frame da lay mau cua video.
+-- Day la bang duy nhat sinh ra tu detection + recognition tu chay, vi Immich chi
+-- detect mat cho video tren dung mot frame thumbnail.
+CREATE TABLE IF NOT EXISTS {vface}(
+  asset_id      uuid NOT NULL,
+  t_ms          int  NOT NULL,        -- moc thoi gian trong video
+  fidx          smallint NOT NULL,    -- thu tu mat trong frame do
+  x1 real, y1 real, x2 real, y2 real, -- chuan hoa 0..1
+  det           real,
+  n_face        smallint,             -- tong so mat detect duoc trong frame do
+  kps           bytea,                -- float32[5][2] chuan hoa 0..1
+  person_id     uuid,                 -- khop voi person cua Immich, hoac NULL
+  sim           real,                 -- cosine voi vector trung tam cua person do
+  sim2          real,                 -- cosine voi person xep thu hai
+  yaw real, roll real, frontality real,
+  sharp real, bright real, symm real,
+  eye_ratio     real,
+  PRIMARY KEY(asset_id, t_ms, fidx)
+);
+
+-- Doan video da chon: mot nguoi, mot khoang thoi gian, kem duong di cua khuon
+-- mat trong khoang do de buoc dung neo duoc tung frame.
+CREATE TABLE IF NOT EXISTS {vclip}(
+  asset_id      uuid NOT NULL,
+  person_id     uuid NOT NULL,
+  cidx          smallint NOT NULL,    -- 0 = doan tot nhat
+  t_start_ms    int NOT NULL,
+  t_end_ms      int NOT NULL,
+  -- Moc KHOANH KHAC (kieu HiLight cua GoPro): dinh cua duong diem, va la thu
+  -- ma doan nay duoc cat ra vi no. Nam o khoang 60% doan, khong phai giua.
+  t_peak_ms     int,
+  score         real,
+  n_frame       int,
+  sim           real,
+  face_ratio    real,                 -- khoang cach hai mat / canh dai, trung binh
+  sharp real, bright real, frontality real,
+  motion        real,                 -- do rung cua khung mat, cang thap cang on
+  -- track: float32[n][11] = t_giay, roi 5 cap (x,y) chuan hoa. Nho vay buoc dung
+  -- noi suy duoc diem neo o bat ky thoi diem nao ma khong phai join lai vface.
+  track         bytea,
+  updated_at    timestamptz DEFAULT now(),
+  PRIMARY KEY(asset_id, person_id, cidx)
 );
 
 CREATE TABLE IF NOT EXISTS {face}(
@@ -88,11 +137,15 @@ CREATE TABLE IF NOT EXISTS {state}(
 
 CREATE INDEX IF NOT EXISTS {p}asset_face_state ON {asset}(face_state);
 CREATE INDEX IF NOT EXISTS {p}asset_body_state ON {asset}(body_state);
+CREATE INDEX IF NOT EXISTS {p}asset_clip_state ON {asset}(clip_state);
 CREATE INDEX IF NOT EXISTS {p}asset_taken      ON {asset}(taken_at);
+CREATE INDEX IF NOT EXISTS {p}asset_kind       ON {asset}(kind);
 CREATE INDEX IF NOT EXISTS {p}face_state       ON {face}(state);
 CREATE INDEX IF NOT EXISTS {p}face_person      ON {face}(person_id);
 CREATE INDEX IF NOT EXISTS {p}body_orient      ON {body}(orientation);
 CREATE INDEX IF NOT EXISTS {p}body_posture     ON {body}(posture);
+CREATE INDEX IF NOT EXISTS {p}vface_person     ON {vface}(person_id);
+CREATE INDEX IF NOT EXISTS {p}vclip_person     ON {vclip}(person_id, score DESC);
 """
 
 
@@ -132,13 +185,25 @@ def connect(s):
 # Them cot vao db da ton tai. ADD COLUMN IF NOT EXISTS co tu Postgres 9.6.
 MIGRATIONS = (
     "ALTER TABLE {face} ADD COLUMN IF NOT EXISTS eye_ratio real",
+    # Nang cap sang ban co video. Anh da index truoc day khong phai lam lai gi:
+    # kind mac dinh 'image', va clip_state=2 nghia la 'khong phai video, bo qua'.
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS kind text DEFAULT 'image'",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS video_path text",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS dur_ms int",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS n_clip int DEFAULT 0",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS clip_state smallint DEFAULT 0",
+    "UPDATE {asset} SET clip_state = 2 WHERE clip_state = 0 AND kind <> 'video'",
+    # Nang cap sang ban cat doan theo khoanh khac. Doan cu khong co t_peak_ms;
+    # chung van dung duoc, chi thieu moc de hien tren UI.
+    "ALTER TABLE {vclip} ADD COLUMN IF NOT EXISTS t_peak_ms int",
 )
 
 
 def ensure_schema(conn, s):
     names = dict(
         p=s.prefix, asset=s.table("asset"), face=s.table("face"),
-        body=s.table("body"), run=s.table("run"), state=s.table("state"))
+        body=s.table("body"), run=s.table("run"), state=s.table("state"),
+        vface=s.table("vface"), vclip=s.table("vclip"))
     with conn.cursor() as cur:
         cur.execute(DDL.format(**names))
         for sql in MIGRATIONS:
