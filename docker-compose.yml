@@ -83,6 +83,13 @@ services:
       BATCH_COMMIT: ${BATCH_COMMIT:-200}
       MAX_SIDE: ${MAX_SIDE:-1600}
       SLEEP_MS: ${SLEEP_MS:-40}
+      # Stage clips: quet frame video de cat ra doan dep nhat co nguoi do.
+      # Dat DO_VIDEO=0 neu chi muon anh. Xem indexer/.env.example cho cac nguong.
+      DO_VIDEO: ${DO_VIDEO:-1}
+      VIDEO_FPS: ${VIDEO_FPS:-2}
+      VIDEO_MAX_SIDE: ${VIDEO_MAX_SIDE:-960}
+      VIDEO_SIM: ${VIDEO_SIM:-0.38}
+      CLIP_SECONDS: ${CLIP_SECONDS:-2.6}
     volumes:
       - models:/models:ro
       - ${UPLOAD_LOCATION:-/tmp}:/immich-upload:ro

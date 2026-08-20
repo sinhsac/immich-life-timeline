@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from tl import db, render
+from tl import db, render, textdraw
 from tl.api import router
 from tl.settings import get
 
@@ -98,6 +98,10 @@ def startup():
     print(f"  ffmpeg : {'ok' if fok else 'THIEU'} - {fmsg}")
     if not fok:
         print("             buoc render se loi cho den khi co ffmpeg")
+    print(f"  chu    : {textdraw.backend()}")
+    if not textdraw.unicode_ok():
+        print("             nhan chuong va ten nguoi se bi BO DAU. Cai pillow +"
+              " mot font TTF, hoac dat FONT_FILE.")
 
 
 @app.on_event("shutdown")
@@ -122,6 +126,7 @@ def _check():
     print(f"  indexer: {'ok' if ok else 'CHUA SAN SANG'} - {msg}")
     fok, fmsg = render.ffmpeg_ok()
     print(f"  ffmpeg : {'ok' if fok else 'THIEU'} - {fmsg}")
+    print(f"  chu    : {textdraw.backend()}")
     return 0 if (ok and fok) else 1
 
 

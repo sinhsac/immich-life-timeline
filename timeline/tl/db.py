@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS {project}(
   --             thanh nhieu cluster khi khoang thoi gian dai.
   person_id     uuid NOT NULL,
   person_ids    uuid[],
+  -- subjects: [[cluster cua nguoi 1...], [cluster cua nguoi 2...]]
+  -- together: chi lay anh co mat DU tat ca nhung nguoi do
+  subjects      jsonb,
+  together      boolean DEFAULT false,
   person_name   text,
   date_from     date,
   date_to       date,
@@ -41,7 +45,15 @@ CREATE TABLE IF NOT EXISTS {frame}(
   fidx          smallint NOT NULL,
   ord           int,                  -- thu tu trong video, NULL = khong duoc chon
   taken_at      timestamptz,
-  bucket        int,
+  fidx2         smallint,             -- mat cua NGUOI THU HAI trong cung anh
+  -- kind='clip' thi fidx la SO AM (-1-cidx) va shot lay tu fp_vclip
+  kind          text DEFAULT 'image',
+  person_id     uuid,                 -- can de tim lai dung dong fp_vclip
+  t_start_ms    int,
+  t_end_ms      int,
+  bucket        int,                  -- so CHUONG (mode story) hoac so o (even)
+  label         text,                 -- nhan chuong: '2019', 'Tháng 3 2019'...
+  hero          boolean DEFAULT false,-- anh chu dao cua chuong, duoc giu lau hon
   score         real,
   excluded      boolean DEFAULT false,-- nguoi bo tay trong UI
   reason        text,                 -- ly do bi loai tu dong
@@ -51,7 +63,8 @@ CREATE TABLE IF NOT EXISTS {frame}(
 CREATE TABLE IF NOT EXISTS {render}(
   id            bigserial PRIMARY KEY,
   project_id    bigint NOT NULL REFERENCES {project}(id) ON DELETE CASCADE,
-  status        text NOT NULL DEFAULT 'queued',  -- queued|frames|encoding|done|error
+  status        text NOT NULL DEFAULT 'queued',
+  -- queued | frames | encoding | audio | done | error
   options       jsonb NOT NULL DEFAULT '{{}}'::jsonb,
   n_total       int DEFAULT 0,
   n_done        int DEFAULT 0,
@@ -68,6 +81,23 @@ CREATE INDEX IF NOT EXISTS {p}render_proj ON {render}(project_id, id DESC);
 -- Nang cap ban cu: project truoc day chi co mot cluster.
 ALTER TABLE {project} ADD COLUMN IF NOT EXISTS person_ids uuid[];
 UPDATE {project} SET person_ids = ARRAY[person_id] WHERE person_ids IS NULL;
+
+-- Nang cap sang ban ke chuyen: frame co them chuong va co danh dau anh chu dao.
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS label text;
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS hero boolean DEFAULT false;
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS fidx2 smallint;
+
+-- Nang cap sang ban co doan video.
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS kind text DEFAULT 'image';
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS person_id uuid;
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS t_start_ms int;
+ALTER TABLE {frame} ADD COLUMN IF NOT EXISTS t_end_ms int;
+
+-- Video nhieu nguoi: subjects la danh sach NHOM cluster, moi nhom mot nguoi.
+-- Dung jsonb chu khong phai uuid[][] vi Postgres khong cho mang long le rang
+-- (moi nhom co so cluster khac nhau).
+ALTER TABLE {project} ADD COLUMN IF NOT EXISTS subjects jsonb;
+ALTER TABLE {project} ADD COLUMN IF NOT EXISTS together boolean DEFAULT false;
 """
 
 _pool = None

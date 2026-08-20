@@ -69,6 +69,29 @@ class Settings:
     copy_embedding: bool = field(default_factory=lambda: _b("COPY_EMBEDDING", True))
     max_side: int = field(default_factory=lambda: _i("MAX_SIDE", 1600))  # resize truoc infer
 
+    # ---- Video ----
+    # Immich chi detect mat cho video tren MOT frame thumbnail, nen muon biet
+    # nguoi do xuat hien o giay thu bao nhieu thi phai tu quet. Day la stage
+    # dat nhat cua ca job, va la stage duy nhat chay detection + recognition.
+    do_video: bool = field(default_factory=lambda: _b("DO_VIDEO", True))
+    video_fps: float = field(default_factory=lambda: _f("VIDEO_FPS", 2.0))
+    video_max_side: int = field(default_factory=lambda: _i("VIDEO_MAX_SIDE", 960))
+    video_max_seconds: float = field(default_factory=lambda: _f("VIDEO_MAX_SECONDS", 0))
+    video_det_size: int = field(default_factory=lambda: _i("VIDEO_DET_SIZE", 512))
+    video_det_conf: float = field(default_factory=lambda: _f("VIDEO_DET_CONF", 0.45))
+    # Cosine toi thieu voi vector trung tam cua mot person trong fp_face.
+    video_sim: float = field(default_factory=lambda: _f("VIDEO_SIM", 0.38))
+    # Cach biet toi thieu so voi person xep thu hai, de khong gan bua cho nguoi
+    # than co net giong nhau.
+    video_margin: float = field(default_factory=lambda: _f("VIDEO_MARGIN", 0.04))
+    video_centroid_per: int = field(default_factory=lambda: _i("VIDEO_CENTROID_PER", 24))
+    # Gom frame thanh doan: cho phep mat hut trong bao lau ma van tinh la lien tuc
+    video_gap_ms: int = field(default_factory=lambda: _i("VIDEO_GAP_MS", 800))
+    clip_seconds: float = field(default_factory=lambda: _f("CLIP_SECONDS", 2.6))
+    clip_min_seconds: float = field(default_factory=lambda: _f("CLIP_MIN_SECONDS", 1.2))
+    clip_max_seconds: float = field(default_factory=lambda: _f("CLIP_MAX_SECONDS", 4.5))
+    clip_per_person: int = field(default_factory=lambda: _i("CLIP_PER_PERSON", 3))
+
     # ---- Pham vi scan ----
     taken_after: str = field(default_factory=lambda: _s("TAKEN_AFTER", ""))
     taken_before: str = field(default_factory=lambda: _s("TAKEN_BEFORE", ""))
@@ -95,11 +118,14 @@ class Settings:
     def describe(self):
         src = f"file {self.media_root}" if self.media_root else (
             f"http {self.immich_url}" if self.immich_url else "chua cau hinh")
+        vid = (f"{self.video_fps or 'moi'} frame/s, mat>={self.video_sim} cosine, "
+               f"doan {self.clip_seconds}s" if self.do_video else "tat")
         return (f"pg      {self.pg_user}@{self.pg_host}:{self.pg_port}/{self.pg_db}"
                 f"  prefix={self.prefix}\n"
                 f"anh     {src}\n"
                 f"model   dir={self.model_dir} face={self.face_model} "
                 f"body={self.body_model}\n"
+                f"video   {vid}\n"
                 f"resource gpu={self.use_gpu} threads={self.onnx_threads} "
                 f"sleep={self.sleep_ms}ms batch={self.batch} limit={self.limit or '-'}")
 

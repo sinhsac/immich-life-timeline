@@ -43,25 +43,69 @@ class Tables:
             self.face = _pick(cur, schema, _FACE, "asset_face")
             self.person = _pick(cur, schema, _PERSON, "person")
             self.search = _SEARCH if _exists(cur, schema, _SEARCH) else None
+            # Duong dan file video: ban moi co encodedVideoPath (bang mp4 da
+            # transcode, nhe hon va luon decode duoc), ban cu chi co
+            # originalPath. Do mot lan chu khong hardcode.
+            self.enc_col = ("encodedVideoPath"
+                            if has_column(cur, schema, self.asset,
+                                          "encodedVideoPath") else None)
+            self.orig_col = ("originalPath"
+                             if has_column(cur, schema, self.asset,
+                                           "originalPath") else None)
+            self.dur_col = ("duration"
+                            if has_column(cur, schema, self.asset,
+                                          "duration") else None)
         conn.rollback()
 
     def q(self, name):
         return f'{self.schema}."{name}"'
 
+    def video_path_expr(self):
+        """Uu tien ban da transcode; khong co thi lay file goc."""
+        cols = [f'a."{c}"' for c in (self.enc_col, self.orig_col) if c]
+        if not cols:
+            return "NULL"
+        return f"COALESCE({', '.join(cols)})" if len(cols) > 1 else cols[0]
+
+    def can_video(self):
+        return bool(self.enc_col or self.orig_col)
+
     def describe(self):
-        return ("immich: " + ", ".join([self.asset, self.exif, self.file,
-                                        self.face, self.person])
-                + (f", {self.search}" if self.search
-                   else "  (KHONG co face_search -> se khong copy embedding)"))
+        out = ("immich: " + ", ".join([self.asset, self.exif, self.file,
+                                       self.face, self.person])
+               + (f", {self.search}" if self.search
+                  else "  (KHONG co face_search -> se khong copy embedding)"))
+        if self.can_video():
+            out += (f"\n        video path tu "
+                    + ", ".join(c for c in (self.enc_col, self.orig_col) if c))
+        else:
+            out += "\n        (khong thay cot duong dan video -> bo qua stage clips)"
+        return out
+
+
+def has_column(cur, schema, table, col):
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+        (schema, table, col))
+    return cur.fetchone() is not None
 
 
 def _date_expr():
     return 'COALESCE(e."dateTimeOriginal", a."localDateTime", a."fileCreatedAt")'
 
 
-def asset_page(t, after_id=None, taken_after=None, taken_before=None, limit=1000):
-    """Mot trang asset: id, ten, ngay, kich thuoc, duong dan preview."""
-    where = ["a.type = 'IMAGE'", 'a."deletedAt" IS NULL']
+def asset_page(t, after_id=None, taken_after=None, taken_before=None, limit=1000,
+               kinds=("IMAGE",)):
+    """Mot trang asset: id, ten, ngay, kich thuoc, duong dan preview.
+
+    kinds: ('IMAGE',) hoac ('IMAGE','VIDEO'). Video cung co ban preview (Immich
+    sinh thumbnail tu mot frame) nen cac stage anh van chay duoc tren no; rieng
+    stage clips moi can duong dan file video that.
+    """
+    kinds = tuple(kinds) or ("IMAGE",)
+    where = [f"a.type = ANY(ARRAY[{','.join(repr(k) for k in kinds)}])",
+             'a."deletedAt" IS NULL']
     params = []
     if after_id:
         where.append("a.id > %s::uuid")
@@ -72,6 +116,7 @@ def asset_page(t, after_id=None, taken_after=None, taken_before=None, limit=1000
     if taken_before:
         where.append(f"{_date_expr()} <= %s::timestamptz")
         params.append(taken_before)
+    dur = f'a."{t.dur_col}"' if t.dur_col else "NULL"
     sql = f"""
 SELECT a.id,
        a."originalFileName",
@@ -80,7 +125,10 @@ SELECT a.id,
        a."fileCreatedAt",
        e."exifImageWidth",
        e."exifImageHeight",
-       pf.path
+       pf.path,
+       a.type,
+       {t.video_path_expr()} AS video_path,
+       {dur} AS duration
 FROM {t.q(t.asset)} a
 LEFT JOIN {t.q(t.exif)} e ON e."assetId" = a.id
 LEFT JOIN LATERAL (
@@ -96,8 +144,10 @@ LIMIT {int(limit)}
     return sql, params
 
 
-def count_assets(conn, t, taken_after=None, taken_before=None):
-    where = ["a.type = 'IMAGE'", 'a."deletedAt" IS NULL']
+def count_assets(conn, t, taken_after=None, taken_before=None, kinds=("IMAGE",)):
+    kinds = tuple(kinds) or ("IMAGE",)
+    where = [f"a.type = ANY(ARRAY[{','.join(repr(k) for k in kinds)}])",
+             'a."deletedAt" IS NULL']
     params = []
     if taken_after:
         where.append(f"{_date_expr()} >= %s::timestamptz")

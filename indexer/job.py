@@ -23,7 +23,7 @@ import time
 from idx import control, immich_src, pgdb, settings, stages
 from idx.media import MediaReader
 
-STAGES = ("assets", "faces", "landmarks", "bodies")
+STAGES = ("assets", "faces", "landmarks", "bodies", "clips")
 
 
 def _on_signal(signum, _frame):
@@ -44,7 +44,7 @@ def main(argv=None):
     ap.add_argument("--stage", action="append", choices=STAGES + ("all",),
                     help="chay rieng mot stage, lap lai duoc. Mac dinh: all")
     ap.add_argument("--stats", action="store_true", help="chi in tinh trang")
-    ap.add_argument("--reset", choices=("faces", "landmarks", "bodies",
+    ap.add_argument("--reset", choices=("faces", "landmarks", "bodies", "clips",
                                         "errors", "all"),
                     help="danh dau lai de chay lai stage tuong ung")
     ap.add_argument("--dry-run", action="store_true",
@@ -105,6 +105,8 @@ def main(argv=None):
                 stages.landmarks(conn, s, t, media)
             elif name == "bodies":
                 stages.bodies(conn, s, t, media)
+            elif name == "clips":
+                stages.clips(conn, s, t, media)
         print(f"\n{media.stats()}")
         print(f"tong thoi gian {(time.time() - t0) / 60:.1f} phut\n")
         _head("tinh trang")
@@ -160,9 +162,65 @@ def _dry_run(conn, s, t, todo):
         except SystemExit as e:
             print(f"  [LOI] {e}")
             ok = False
+    if "clips" in todo and s.do_video:
+        ok = _dry_video(conn, s, t, m) and ok
 
     print("\n" + ("san sang chay." if ok else "con loi phia tren, sua truoc khi chay."))
     return 0 if ok else 1
+
+
+def _dry_video(conn, s, t, media):
+    """Kiem tra rieng cho stage clips: cot video, model, file, va decode thu."""
+    from idx.media import video_frames, video_info
+    ok = True
+    if not t.can_video():
+        print("  [--] Immich khong co cot duong dan video -> stage clips bo qua")
+        return True
+    if not media.root:
+        print("  [LOI] stage clips can MEDIA_ROOT, che do HTTP khong dung duoc")
+        return False
+    try:
+        from idx.facedetect import FaceDetector, PersonIndex
+        fd = FaceDetector(s)
+        fd.close()
+        print(f"  [ok] model detection + recognition cua {s.face_model} load duoc")
+    except SystemExit as e:
+        print(f"  [LOI] {e}")
+        return False
+    n = len(PersonIndex(conn, s))
+    if n:
+        print(f"  [ok] {n} person co vector trung tam de gan ten cho mat video")
+    else:
+        print("  [LOI] chua co person nao co embedding -> chay faces + landmarks truoc")
+        ok = False
+
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT id, video_path FROM {s.table('asset')} "
+                    f"WHERE kind='video' AND video_path IS NOT NULL LIMIT 3")
+        rows = cur.fetchall()
+    conn.rollback()
+    if not rows:
+        print("  [--] fp_asset chua co video nao, chay --stage assets truoc")
+        return ok
+    for aid, vpath in rows:
+        p = media.resolve(vpath)
+        if p is None:
+            print(f"  [LOI] khong tim thay file video cua {aid} (path={vpath})")
+            ok = False
+            continue
+        info = video_info(p)
+        if info is None:
+            print(f"  [LOI] khong mo duoc {p}")
+            ok = False
+            continue
+        fps, nf, dur, w, h = info
+        got = 0
+        for _t, img in video_frames(p, s.video_fps, s.video_max_side, 2.0):
+            got += 1
+        print(f"  [ok] {p.name}: {w}x{h} {fps:.1f}fps {dur / 1000:.1f}s "
+              f"-> lay mau duoc {got} frame trong 2 giay dau")
+        break
+    return ok
 
 
 def _head(name):

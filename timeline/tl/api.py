@@ -6,6 +6,7 @@
   GET    /api/projects/{id}/result       ket qua loc hien tai (+ ly do loai)
   PATCH  /api/projects/{id}/filters      tinh chinh nguong -> tinh lai ngay
   POST   /api/projects/{id}/exclude      bo / lay lai mot anh bang tay
+  POST   /api/projects/{id}/storyboard  cau truc cau chuyen + thoi luong that
   POST   /api/projects/{id}/render       dung video
   GET    /api/renders/{id}               tien do
   GET    /api/renders/{id}/video         tai mp4
@@ -18,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import db, people, projects, render, select, thumbs
+from . import db, people, projects, render, select, story, textdraw, thumbs
 from .settings import get
 
 router = APIRouter(prefix="/api")
@@ -26,20 +27,39 @@ router = APIRouter(prefix="/api")
 
 # ----------------------------------------------------------------- schemas
 class CreateProject(BaseModel):
+    """Yeu cau chi gom: AI, va (tuy chon) TU NGAY NAO DEN NGAY NAO.
+
+    Do dai video khong nam o day — no duoc suy ra tu du lieu. Muon dat tay thi
+    gui filters.target_seconds (che do chuyen gia).
+
+      mot nguoi          person_ids: ["c1","c2"]        cac cluster cua ho
+      hai nguoi          subjects: [["c1","c2"],["c3"]]
+      hai nguoi chup chung  + together: true
+    """
     # person_id: mot cluster (cach cu, van dung duoc)
-    # person_ids: nhieu cluster cua cung mot nguoi -> gop lai thanh mot video
+    # person_ids: nhieu cluster cua CUNG mot nguoi -> gop thanh mot video
     person_id: str | None = None
     person_ids: list[str] | None = None
+    # subjects: nhieu NGUOI, moi nguoi la mot danh sach cluster
+    subjects: list[list[str]] | None = None
+    together: bool = False
     name: str | None = None
     date_from: str | None = None
     date_to: str | None = None
     filters: dict[str, Any] | None = None
 
-    def clusters(self):
+    def groups(self):
+        if self.subjects:
+            return [[str(x) for x in g if x] for g in self.subjects if g]
         ids = list(self.person_ids or [])
         if self.person_id and self.person_id not in ids:
             ids.insert(0, self.person_id)
-        return ids
+        return [[str(i) for i in ids]] if ids else []
+
+
+class MakeVideo(CreateProject):
+    """Nhu CreateProject, nhung dung luon video thay vi dung lai o buoc chon anh."""
+    options: dict[str, Any] | None = None
 
 
 class Filters(BaseModel):
@@ -66,6 +86,7 @@ def health():
     fok, fmsg = render.ffmpeg_ok()
     return {"indexer": {"ok": ok, "detail": msg},
             "ffmpeg": {"ok": fok, "detail": fmsg},
+            "text": {"ok": textdraw.unicode_ok(), "detail": textdraw.backend()},
             "media_root": s.media_root,
             "media_src": s.media_src,
             "auth": bool(s.api_token),
@@ -81,7 +102,9 @@ def progress():
 @router.get("/defaults")
 def defaults():
     return {"filters": select.DEFAULTS, "render": render.DEFAULT_OPTIONS,
-            "max_frames": get().max_frames}
+            "max_frames": get().max_frames,
+            "story": {**story.describe(), "text_backend": textdraw.backend(),
+                      "unicode_text": textdraw.unicode_ok()}}
 
 
 # ----------------------------------------------------------------- buoc 1
@@ -118,15 +141,46 @@ def list_projects():
 
 @router.post("/projects")
 def create_project(body: CreateProject):
-    ids = body.clusters()
-    if not ids:
-        raise HTTPException(400, "can person_id hoac person_ids")
+    grps = body.groups()
+    if not grps:
+        raise HTTPException(400, "can person_id, person_ids hoac subjects")
     try:
-        pid, res = projects.create(ids, body.name, body.date_from,
-                                   body.date_to, body.filters)
+        pid, res = projects.create(grps, body.name, body.date_from,
+                                   body.date_to, body.filters, body.together)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return {"project_id": pid, **_slim(res)}
+
+
+@router.post("/videos")
+def make_video(body: MakeVideo):
+    """Duong mot buoc: chon nguoi -> co video. Khong setup gi.
+
+    Tao du an, tu suy nguong loc, chia chuong, tu suy do dai, roi bat dau dung
+    ngay trong cung mot request. Tra ve render_id=None khi khong du 2 anh — de UI
+    dua nguoi dung sang cho noi nguong thay vi render bua roi bao loi ffmpeg.
+    """
+    grps = body.groups()
+    if not grps:
+        raise HTTPException(400, "can person_id, person_ids hoac subjects")
+    try:
+        pid, res = projects.create(grps, body.name, body.date_from,
+                                   body.date_to, body.filters, body.together)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    out = {"project_id": pid, "render_id": None, **_slim(res, False)}
+    if res["n_selected"] < 2:
+        out["detail"] = (f"chi chon duoc {res['n_selected']} anh, can it nhat 2 "
+                         f"— noi nguong loc roi thu lai")
+        return out
+    try:
+        out["render_id"] = render.start(pid, body.options)
+    except RuntimeError as e:                  # dang co render khac chay
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        out["detail"] = str(e)
+    return out
 
 
 @router.get("/projects/{project_id}")
@@ -150,7 +204,11 @@ def project_result(project_id: int,
         p = projects.get_project(project_id)
     except KeyError as e:
         raise HTTPException(404, str(e)) from e
-    cands = select.fetch(p["person_id"], p["date_from"], p["date_to"])
+    # subjects, khong phai person_id: du an co the gop nhieu cluster cua cung
+    # mot nguoi, hoac gom nhieu nguoi — lay mot cluster la mat phan lon anh.
+    cands = select.fetch(p["subjects"], p["date_from"], p["date_to"],
+                         p["together"],
+                         (p["filters"] or {}).get("use_clips", True))
     res = select.apply(cands, p["filters"], projects.excluded_keys(project_id))
     return _slim(res, include_rejected)
 
@@ -181,6 +239,7 @@ def rename(project_id: int, name: str = Query(min_length=1, max_length=120)):
 # ----------------------------------------------------------------- anh
 @router.get("/thumb/{asset_id}/{fidx}")
 def thumb(asset_id: str, fidx: int, size: int = Query(160, ge=48, le=512)):
+    """fidx >= 0 la khuon mat trong anh; fidx AM la doan video thu (-1-fidx)."""
     p = thumbs.face_thumb(asset_id, fidx, size)
     if p is None:
         raise HTTPException(404, "khong doc duoc anh preview")
@@ -207,6 +266,20 @@ def aligned(asset_id: str, fidx: int,
 
 
 # ----------------------------------------------------------------- buoc 4
+@router.post("/projects/{project_id}/storyboard")
+def storyboard(project_id: int, body: RenderOptions):
+    """Cau chuyen se ra sao: bao nhieu chuong, moi shot dai bao nhieu giay.
+
+    Tinh dung bang thuat toan ma render dung, nen con so thoi luong o day la
+    con so that — khong phai uoc luong. Goi truoc khi render de khoi dung mot
+    video 4 phut roi moi phat hien.
+    """
+    try:
+        return render.plan_for(project_id, body.options)
+    except KeyError as e:
+        raise HTTPException(404, str(e)) from e
+
+
 @router.post("/projects/{project_id}/render")
 def start_render(project_id: int, body: RenderOptions):
     try:
@@ -245,7 +318,9 @@ def purge(days: int = Query(30, ge=0, le=3650)):
 
 
 # ----------------------------------------------------------------- helpers
-_KEEP = ("asset_id", "fidx", "taken_at", "ord", "bucket", "score", "reason",
+_KEEP = ("asset_id", "fidx", "fidx2", "taken_at", "ord", "bucket", "label",
+         "hero", "n_subject", "score", "reason",
+         "kind", "dur_s", "motion", "t_start_ms", "t_end_ms", "t_peak_ms",
          "yaw", "pitch", "roll", "frontality", "ear", "eye_ratio", "sharp",
          "bright", "quality", "age", "n_face", "n_body", "posture",
          "orientation", "body_front", "filename")
@@ -266,7 +341,8 @@ def _row(r):
 
 def _slim(res, include_rejected=True):
     out = {k: res[k] for k in ("filters", "n_candidate", "n_pass", "n_selected",
-                               "n_rejected", "reasons", "timeline", "gaps")}
+                               "n_rejected", "reasons", "timeline", "gaps",
+                               "story")}
     out["selected"] = [_row(r) for r in res["selected"]]
     if include_rejected:
         # sap theo diem giam dan: anh "gan dat" nam tren, de nguoi dung

@@ -9,8 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     WORK_DIR=/work
 
 # ffmpeg la phu thuoc bat buoc cua buoc render.
+# fonts-dejavu-core (~1MB) de ve duoc nhan chuong va ten nguoi CO DAU tieng Viet;
+# thieu font thi textdraw.py tu dong bo dau, video van ra nhung chu xau.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libglib2.0-0 libgomp1 \
+        ffmpeg libglib2.0-0 libgomp1 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

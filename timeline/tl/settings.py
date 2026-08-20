@@ -49,6 +49,9 @@ class Settings:
 
     # ---- ffmpeg ----
     ffmpeg: str = field(default_factory=lambda: _s("FFMPEG", "ffmpeg"))
+    # ffprobe di kem ffmpeg. Dung de biet doan video co track tieng khong —
+    # mot input khong co audio se lam ca filter_complex ghep tieng that bai.
+    ffprobe: str = field(default_factory=lambda: _s("FFPROBE", "ffprobe"))
     ffmpeg_threads: int = field(default_factory=lambda: _i("FFMPEG_THREADS", 2))
     font_file: str = field(default_factory=lambda: _s("FONT_FILE", ""))
 

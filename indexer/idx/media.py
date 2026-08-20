@@ -139,3 +139,57 @@ def downscale(img, max_side):
     r = max_side / float(m)
     return cv2.resize(img, (int(round(w * r)), int(round(h * r))),
                       interpolation=cv2.INTER_AREA)
+
+
+def video_info(path):
+    """(fps, n_frame, dur_ms, w, h) — doc header, khong decode frame nao."""
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return None
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        dur = int(round(n / fps * 1000)) if fps > 0 and n > 0 else 0
+        return fps, n, dur, w, h
+    finally:
+        cap.release()
+
+
+def video_frames(path, fps=2.0, max_side=960, max_seconds=0.0):
+    """Lay mau frame cua video: yield (t_ms, img BGR).
+
+    fps=0 nghia la LAY TAT CA frame. Dat mot con so thi bo qua frame giua bang
+    grab() — grab chi doc va giai ma toi thieu de nhay tiep, khong dung ra anh
+    BGR, nen re hon retrieve() nhieu lan. Day la khac biet giua "quet 2 frame moi
+    giay" ton bang 1/15 va ton bang 1 cua "decode het roi bo".
+
+    Khong dung cap.set(POS_FRAMES) de nhay: voi codec co B-frame, seek phai
+    decode lai tu keyframe gan nhat nen doc tuan tu con nhanh hon, va vi tri tra
+    ve khong dang tin.
+    """
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return
+    try:
+        src = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        step = 1
+        if fps and fps > 0 and src > 0:
+            step = max(1, int(round(src / float(fps))))
+        i = 0
+        limit_ms = max_seconds * 1000.0 if max_seconds else 0.0
+        while True:
+            if not cap.grab():
+                break
+            if i % step == 0:
+                t_ms = (i / src * 1000.0 if src > 0
+                        else float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0))
+                if limit_ms and t_ms > limit_ms:
+                    break
+                ok, img = cap.retrieve()
+                if ok and img is not None:
+                    yield int(round(t_ms)), downscale(img, max_side)
+            i += 1
+    finally:
+        cap.release()

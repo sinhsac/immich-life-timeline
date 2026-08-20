@@ -5,9 +5,9 @@
 [![license: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE.md)
 
 Chọn một người trong thư viện ảnh [Immich](https://immich.app) của bạn, công cụ
-này lọc ra những khung hình hợp lý trải đều theo thời gian, neo khuôn mặt về
-cùng một vị trí rồi ghép thành video — xem lại như thấy người đó lớn dần qua
-nhiều năm.
+này chia hành trình của người đó thành từng chương theo thời gian, mỗi chương lấy
+một khoảnh khắc đáng giữ nhất, neo khuôn mặt về cùng một vị trí rồi dựng thành
+một video ngắn có mở đầu, có nhịp, có kết.
 
 Điểm khác biệt so với việc ghép ảnh thủ công: **khuôn mặt được neo cố định**.
 Nếu chỉ xếp ảnh theo thứ tự thời gian thì mặt nhảy loạn mỗi frame, không xem
@@ -17,6 +17,45 @@ chỗ với cùng một kích thước.
 Và quan trọng: **neo không có nghĩa là crop sát mặt**. Khuôn mặt chỉ là điểm
 neo, còn khung hình vẫn giữ bối cảnh — cả người, cảnh vật, những người xung
 quanh. Đó là thứ làm video có cảm xúc thay vì thành dãy ảnh thẻ.
+
+## Kể chuyện, không phải băng ảnh
+
+Bản đầu tiên rải ảnh đều tuyệt đối rồi cho mỗi ảnh 1/6 giây. Ra một băng ảnh chạy
+từ đầu đến cuối, mọi frame quan trọng như nhau, mặt đổi liên tục — xem mười giây
+là mệt, vì không có chỗ nào để mắt nghỉ và không gì phân biệt một buổi chiều bình
+thường với ngày tốt nghiệp.
+
+Bây giờ mặc định là chế độ **kể chuyện**:
+
+- **Bạn không đặt gì cả.** Yêu cầu chỉ gồm *ai* và (tuỳ chọn) *khoảng thời gian
+  nào*. Độ dài là **kết quả**: chương nào nhiều ảnh thì dày hơn, hành trình dài
+  thì nhiều chương hơn, và tổng bị chặn trong 16–150 giây để không bao giờ ra một
+  video 20 phút. Xem xong có hai nút *Ngắn hơn / Dài hơn* để phản ứng với cái đã
+  thấy, thay vì đoán một con số trước khi thấy gì.
+- **Chia chương theo thời gian** (hai năm / năm / nửa năm / quý / tháng — tự chọn
+  mức mịn nhất còn vừa thời lượng). Mỗi chương mở ra bằng một nhãn thời gian hiện
+  lên rồi tan đi.
+- **Mỗi chương có một ảnh điểm nhấn** giữ lâu gần gấp đôi ảnh phụ. Đây là thứ tạo
+  ra nhịp; chia chương mà thiếu nó thì vẫn là băng ảnh.
+- **Mỗi chương luôn được ít nhất một ảnh.** Phủ kín thời gian đáng giá hơn độ dày:
+  mất một năm khỏi video là mất một đoạn câu chuyện.
+- **Chồng mờ giữa các ảnh**, mở màn từ đen, đóng màn về đen, thẻ tiêu đề mở đầu
+  với tên và khoảng năm.
+- **Zoom rất chậm trong từng ảnh** — nhưng zoom *quanh điểm giữa hai mắt*, nên
+  khuôn mặt không hề xê dịch, chỉ bối cảnh rộng ra hẹp vào. Neo vẫn là neo, khung
+  hết bất động.
+- **Có cả đoạn video thật, kèm tiếng.** Job indexer quét từng frame video trong
+  thư viện, tìm đúng người bạn chọn, rồi cắt ra đoạn đẹp nhất — đủ nét, đủ sáng,
+  mặt đủ to, không rung, và có bối cảnh. Mỗi chương có đoạn thì được giành một
+  suất, vì một đoạn động đáng giá hơn một bức ảnh đẹp hơn nó một chút. Tiếng vào
+  *trước* hình và còn lại *sau* khi hình đã cắt, nên nghe như sống lại khoảnh khắc
+  chứ không như chèn tiếng vào.
+- **Khuôn mặt trong đoạn video cũng được neo.** Người trong khung cử động, còn
+  khung thì không: indexer lưu đường đi của khuôn mặt qua từng mốc, bước dựng nội
+  suy giữa hai mốc gần nhất.
+
+Kiểu flipbook cũ vẫn còn nguyên nếu bạn thích: đổi sang chế độ *Rải đều* ở bước 3
+và 4. Chi tiết tham số ở [`timeline/README.md`](timeline/README.md).
 
 ## Ý tưởng cốt lõi: không làm lại việc Immich đã làm
 
@@ -30,10 +69,17 @@ không có:
 
 | Việc | Model | Ai làm |
 |---|---|---|
-| Tìm mặt, vector nhận dạng | SCRFD + ArcFace | **Immich** đã làm, chỉ copy kết quả |
+| Tìm mặt trong **ảnh**, vector nhận dạng | SCRFD + ArcFace | **Immich** đã làm, chỉ copy kết quả |
 | Hướng đầu, 68 điểm 3D | `1k3d68` trong `buffalo_l` | công cụ này |
 | Tư thế cơ thể, 17 keypoint | `yolov8n-pose` | công cụ này |
+| Tìm mặt trong **video** theo thời gian | `det_10g` + `w600k_r50` | công cụ này |
 | Neo mặt để dựng video | không cần model | dùng lại `kps` đã lưu |
+
+Hàng thứ tư là ngoại lệ duy nhất, và có lý do cụ thể: Immich chỉ chạy face
+detection cho video trên **đúng một frame thumbnail**. Biết một clip có ông A là
+đủ để liệt kê, nhưng không đủ để cắt ra "đoạn đẹp nhất có ông A". Điểm nhẹ nhõm là
+hai model đó **đã nằm sẵn trong bộ `buffalo_l`** mà bước tải model kéo về — từ
+trước giờ chỉ không dùng đến. Không phải tải thêm gì.
 
 Toàn bộ dữ liệu mới ghi vào **bảng riêng prefix `fp_`** trong chính database của
 Immich. Bảng của Immich **chỉ đọc, không bao giờ bị ghi**.
@@ -60,16 +106,22 @@ Không cần GPU. Thiết kế nhằm vào máy yếu: 4 core, 8GB RAM, chạy c
 Immich (đã chạy Facial Recognition)
         │
         ├─ indexer — chạy một lần, rồi định kỳ cho ảnh mới
-        │    1 assets     → fp_asset   danh sách ảnh + ngày chụp
+        │    1 assets     → fp_asset   danh sách ảnh + video + ngày chụp
         │    2 faces      → fp_face    bbox + vector, copy từ Immich
         │    3 landmarks  → fp_face    yaw/pitch/roll, chất lượng, điểm neo
         │    4 bodies     → fp_body    17 keypoint, tư thế, hướng thân
+        │    5 clips      → fp_vface   quét frame video, tìm người
+        │                  fp_vclip    cắt ra đoạn đẹp nhất + đường đi của mặt
         │
         └─ timeline — service thường trú
-             1 chọn người   gộp nhiều cụm của cùng một người
-             2 lấy ảnh      rải đều theo thời gian, không dồn cục
-             3 tinh chỉnh   kéo ngưỡng, mỗi ảnh bị loại đều có lý do
-             4 dựng video   neo mặt + ffmpeg → mp4
+             chọn người (+ khoảng ngày)  →  VIDEO
+               tự suy ngưỡng · chia chương · tự suy độ dài · neo mặt · ffmpeg
+
+             công tắc "Chuyên gia" mở lại từng khâu:
+             1 chọn cụm     một người nhiều cụm, hoặc nhiều người
+             2 ảnh đã chọn  phân bố theo năm và theo chương
+             3 ngưỡng lọc   kéo ngưỡng, mỗi ảnh bị loại đều có lý do
+             4 thông số     xem cấu trúc chuyện + thời lượng thật rồi mới dựng
 ```
 
 ## Chạy bằng Docker Compose
@@ -158,11 +210,22 @@ DOCKER_BUILDKIT=1 docker build -f timeline/deploy/Dockerfile -t fp-timeline time
 `insightface` không phát hành wheel nên phải compile từ source — image indexer
 dùng multi-stage, compiler chỉ nằm ở stage build.
 
-## Bốn bước trên UI
+## Cách dùng: chọn người, bấm một nút
 
-Nếu chỉ muốn kết quả nhanh: chọn người rồi bấm **Tạo video ngay** — service tự
-suy ngưỡng, chọn ảnh và dựng video trong một cú bấm. Bốn bước dưới đây là đường
-**nâng cao**, dùng khi muốn tự tay kiểm soát từng khâu.
+Yêu cầu chỉ gồm **ai** và (tuỳ chọn) **khoảng thời gian nào**:
+
+- video của ông A → chọn các cụm của ông A, bấm *Tạo video*
+- video của ông A với bà B → chọn cụm của A, bấm *+ Thêm người nữa*, chọn cụm của
+  B. Tích *chỉ ảnh có mặt đủ tất cả* nếu muốn riêng ảnh chụp chung
+- video của ông A từ 1/1/2000 đến 12/12/2020 → thêm hai ô ngày
+
+Không có thanh trượt nào trên đường này. Service tự suy ngưỡng lọc, chia chương,
+tự suy độ dài và dựng luôn.
+
+## Bốn bước, sau công tắc "Chuyên gia"
+
+Bật công tắc ở góc trên để mở lại từng khâu. Tắt thì chúng không xuất hiện trên
+giao diện.
 
 **1. Chọn người.** Danh sách lấy từ cụm khuôn mặt Immich đã phân loại. Immich
 thường tách **một người thành nhiều cụm** ở các mốc tuổi khác nhau — bé, thiếu
@@ -175,16 +238,18 @@ thật, cụm cùng người đạt 0,55 còn một người khác trong nhà đ
 hẹp. Vì vậy cụm nào đã được đặt **tên khác** sẽ bị đánh dấu và đẩy xuống cuối,
 tín hiệu đó đáng tin hơn con số. Vẫn phải nhìn ảnh rồi mới chọn.
 
-**2. Lấy ảnh tự động.** Đây là bước quyết định video có "đều" hay không. Chia
-timeline thành các ô thời gian bằng nhau rồi mỗi ô chỉ giữ vài ảnh điểm cao
-nhất. Không làm vậy thì một chuyến du lịch 200 ảnh chiếm hết video, còn những
-năm ít ảnh mất hẳn.
+**2. Lấy ảnh tự động.** Chia thời gian thành chương rồi phân bổ ngân sách thời
+lượng cho từng chương. Không làm vậy thì một chuyến du lịch 200 ảnh chiếm hết
+video, còn những năm ít ảnh mất hẳn.
 
-**3. Tinh chỉnh.** Kéo ngưỡng góc đầu, độ nét, độ sáng, tư thế. **Mỗi ảnh bị
-loại đều hiện lý do cụ thể**, nên biết phải nới ngưỡng nào chứ không phải đoán.
+**3. Tinh chỉnh.** Đặt độ dài mong muốn, nhịp kể, một chương là bao lâu. Kéo
+ngưỡng góc đầu, độ nét, độ sáng, tư thế. Ảnh vào video được **nhóm theo chương**
+và ảnh điểm nhấn có dấu riêng, nên thấy ngay chương nào mỏng. **Mỗi ảnh bị loại
+đều hiện lý do cụ thể**, nên biết phải nới ngưỡng nào chứ không phải đoán.
 
-**4. Dựng video.** Xem trước ba frame cách xa nhau về thời gian để kiểm tra
-khung, rồi ffmpeg ghép thành mp4.
+**4. Dựng video.** Xem cấu trúc câu chuyện với **thời lượng thật đến từng frame**
+trước khi render, xem trước ba khung cách xa nhau về thời gian, rồi dựng thành
+mp4.
 
 ## Khung hình: tham số quan trọng nhất
 
@@ -216,7 +281,9 @@ Prefix mặc định `fp_`, đổi bằng `TABLE_PREFIX`.
 | `fp_asset` | một dòng mỗi ảnh: ngày chụp, đường dẫn preview, trạng thái xử lý |
 | `fp_face` | một dòng mỗi mặt: bbox, vector, yaw/pitch/roll, chất lượng, điểm neo |
 | `fp_body` | một dòng mỗi người: 17 keypoint, tư thế, hướng thân |
-| `fp_project` | dự án video: người + bộ ngưỡng + danh sách frame |
+| `fp_vface` | một dòng mỗi mặt khớp được với một người, trên mỗi frame video đã quét |
+| `fp_vclip` | đoạn video đã chọn: người, khoảng thời gian, điểm, đường đi của mặt |
+| `fp_project` | dự án video: người + bộ ngưỡng + danh sách frame kèm chương và ảnh điểm nhấn |
 | `fp_run` | log mỗi lần chạy stage |
 
 Ví dụ truy vấn trực tiếp — ảnh có đúng một người, đứng chính diện, mặt nét:
@@ -263,10 +330,20 @@ token.
 
 ## Giới hạn đã biết
 
+- **Quét video là stage đắt nhất.** Ước lượng thô trên CPU 4 core: một video 1
+  phút ở `VIDEO_FPS=2` mất 10–15 giây, nên 500 video một phút là khoảng 1,5–2 giờ.
+  Job resumable theo từng video. Không cần thì đặt `DO_VIDEO=0`.
+- **Quét video cần `MEDIA_ROOT`.** Chế độ `IMMICH_URL` không dùng được: tải cả
+  thư viện video qua HTTP chỉ để quét là không hợp lý.
+- **Giữa các đoạn video là im lặng**, vì ảnh tĩnh không có tiếng. Tiếng của từng
+  đoạn được vào trước hình và còn lại sau khi hình đã cắt để đỡ giật cục, nhưng
+  đây không phải một bản mix liền mạch. Tắt bằng `audio: false`.
 - **Ngày chụp sai thì video sai.** Ảnh không có EXIF `DateTimeOriginal` sẽ dùng
   ngày file, dễ dồn cục vào ngày scan. Indexer in cảnh báo khi phát hiện — sửa
   trong Immich rồi chạy lại stage `assets`.
-- **Người có ít hơn ~20 ảnh** trải theo thời gian thì video nhảy, không mượt.
+- **Người có ít hơn ~20 ảnh** trải theo thời gian thì chương nào cũng chỉ có một
+  ảnh, video thành slideshow chứ chưa thành chuyện.
+- **Không có nhạc nền.** Chỉ có tiếng thật của các đoạn video, không có track nhạc.
 - Render đọc ảnh **preview** của Immich (thường 1440px), không phải ảnh gốc. Đủ
   cho khung 720–1080.
 - Hướng đầu tính bằng khớp affine 3D-3D với hình dáng trung bình của model, không

@@ -23,12 +23,16 @@ _tls = threading.local()
 
 def resolve(media_root, preview_path):
     """Duong dan trong db la duong dan TRONG container Immich."""
-    if not (media_root and preview_path):
+    if not preview_path:
         return None
-    root = Path(media_root)
     p = Path(str(preview_path))
+    # Duong dan tuyet doi va co that thi dung luon, khong can MEDIA_ROOT. Truoc
+    # day nhanh nay nam sau cai guard doi MEDIA_ROOT nen khong bao gio chay.
     if p.is_absolute() and p.exists():
         return p
+    if not media_root:
+        return None
+    root = Path(media_root)
     cands = []
     parts = p.parts
     for a in _ANCHORS:
@@ -135,6 +139,34 @@ def kps_from_blob(blob, w, h):
     return k
 
 
+def pair_kps(k1, k2, min_ratio=1.3):
+    """Diem neo cho video HAI NGUOI: giu ca hai khuon mat o cho co dinh.
+
+    anchor_frame chi dung k[0] va k[1] (hai mat) de suy ra tam, goc va ty le. Neu
+    truyen thang hai tam mat cua hai nguoi vao do thi voi level=True ca anh se bi
+    xoay cho hai nguoi nam ngang — bo cao con thap la lech 30 do, hong anh.
+
+    Nen o day tra ve HAI DIEM AO nam ngang, cach nhau dung khoang cach that giua
+    hai nguoi, dat quanh trung diem cua ho. Ket qua: goc xoay 0, trung diem cua
+    hai nguoi luon o mot cho, va khoang cach giua ho luon bang mot ty le khung —
+    ai xa nhau thi khung tu rong ra de chua het ca hai.
+
+    min_ratio chan truong hop hai mat gan trung nhau (nguoi dung sat nhau, hoac
+    cung mot nguoi bi Immich tach thanh hai cum): luc do d ~ 0 va he so phong to
+    se no ra vo cuc.
+    """
+    a, b = np.asarray(k1, np.float32), np.asarray(k2, np.float32)
+    if a.shape[0] < 2 or b.shape[0] < 2:
+        return None
+    ca, cb = (a[0] + a[1]) / 2.0, (b[0] + b[1]) / 2.0
+    mid = (ca + cb) / 2.0
+    d = float(np.hypot(*(cb - ca)))
+    eye = max(float(np.hypot(*(a[1] - a[0]))), float(np.hypot(*(b[1] - b[0]))))
+    d = max(d, min_ratio * max(eye, 1e-3))
+    return np.array([[mid[0] - d / 2.0, mid[1]],
+                     [mid[0] + d / 2.0, mid[1]]], np.float32)
+
+
 ASPECTS = {"1:1": (1, 1), "4:3": (4, 3), "3:2": (3, 2), "16:9": (16, 9),
            "3:4": (3, 4), "2:3": (2, 3), "9:16": (9, 16)}
 
@@ -164,7 +196,8 @@ def _blur_cover(img, out_w, out_h, strength=0.06, dim=0.55):
 
 
 def anchor_frame(img, kps, out_w, out_h, face_frac=0.12, anchor_x=0.5,
-                 eye_y=0.33, level=True, fill="crop", max_zoom=4.0):
+                 eye_y=0.33, level=True, fill="crop", max_zoom=4.0,
+                 zoom=1.0, interp=cv2.INTER_LANCZOS4):
     """Neo khuon mat vao mot cho co dinh nhung GIU CANG NHIEU KHUNG ANH CANG TOT.
 
     Khuon mat chi la diem neo, khong phai chu the duy nhat cua khung. Tham so
@@ -181,6 +214,11 @@ def anchor_frame(img, kps, out_w, out_h, face_frac=0.12, anchor_x=0.5,
 
     Anh khong du lon de phu kin khung thi phai phong to them, luc do khuon mat
     to hon face_frac mot chut — max_zoom chan lai de khong phong to qua da.
+
+    zoom la he so Ken Burns cho video ke chuyen. Diem quan trong: phep bien doi
+    LUON dua diem giua hai mat ve dung 'target', nen zoom KHONG lam mat xe dich
+    — chi khung anh rong ra hep vao. Neo van la neo, nhung khung het bat dong.
+    interp: chuyen canh dung INTER_LINEAR cho re, frame tinh dung LANCZOS4.
     """
     k = np.asarray(kps, np.float32)
     if k.shape[0] < 2:
@@ -209,7 +247,7 @@ def anchor_frame(img, kps, out_w, out_h, face_frac=0.12, anchor_x=0.5,
         p = corners @ m[:, :2].T + m[:, 2]
         return (p[:, 0].min(), p[:, 0].max(), p[:, 1].min(), p[:, 1].max())
 
-    scale = (face_frac * out_w) / dist
+    scale = (face_frac * out_w) / dist * max(0.2, float(zoom))
     m = build(scale)
     x0, x1, y0, y1 = span(m)
 
@@ -221,7 +259,7 @@ def anchor_frame(img, kps, out_w, out_h, face_frac=0.12, anchor_x=0.5,
             x0, x1, y0, y1 = span(m)
         m[0, 2] += (-x0) if x0 < 0 else (out_w - x1 if x1 > out_w else 0.0)
         m[1, 2] += (-y0) if y0 < 0 else (out_h - y1 if y1 > out_h else 0.0)
-        fg = cv2.warpAffine(img, m, (out_w, out_h), flags=cv2.INTER_LANCZOS4,
+        fg = cv2.warpAffine(img, m, (out_w, out_h), flags=interp,
                             borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
         hit = cv2.warpAffine(np.full((h, w), 255, np.uint8), m, (out_w, out_h),
                              flags=cv2.INTER_NEAREST, borderValue=0)
@@ -237,8 +275,16 @@ def anchor_frame(img, kps, out_w, out_h, face_frac=0.12, anchor_x=0.5,
     # day anh vao cho phu kin, uu tien giu khuon mat dung vi tri neo
     m[0, 2] += (-x0) if x0 > 0 else (out_w - x1 if x1 < out_w else 0.0)
     m[1, 2] += (-y0) if y0 > 0 else (out_h - y1 if y1 < out_h else 0.0)
-    return cv2.warpAffine(img, m, (out_w, out_h), flags=cv2.INTER_LANCZOS4,
+    return cv2.warpAffine(img, m, (out_w, out_h), flags=interp,
                           borderMode=cv2.BORDER_REPLICATE)
+
+
+def dim(frame, k):
+    """Nhan sang cua frame — dung cho mo man tu den va dong man ve den."""
+    k = max(0.0, min(1.0, float(k)))
+    if k >= 0.999:
+        return frame
+    return (frame.astype(np.float32) * k).astype(np.uint8)
 
 
 def align(img, kps, size=512, eye_dx=0.29, eye_y=0.42):
