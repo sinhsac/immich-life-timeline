@@ -134,7 +134,16 @@ CREATE TABLE IF NOT EXISTS {state}(
   key   text PRIMARY KEY,
   value text
 );
+"""
 
+# Index tach RIENG khoi DDL va chay SAU MIGRATIONS.
+#
+# Ly do: voi db da co tu ban truoc, 'CREATE TABLE IF NOT EXISTS {asset}' la
+# no-op nen cac cot moi (kind, clip_state, ...) chua ton tai. Neu de lenh
+# CREATE INDEX ... (clip_state) chung block voi DDL thi no chay truoc
+# MIGRATIONS va bao UndefinedColumn, ca transaction rollback -> MIGRATIONS
+# khong bao gio duoc chay, va lan sau van loi y nguyen.
+INDEXES = """
 CREATE INDEX IF NOT EXISTS {p}asset_face_state ON {asset}(face_state);
 CREATE INDEX IF NOT EXISTS {p}asset_body_state ON {asset}(body_state);
 CREATE INDEX IF NOT EXISTS {p}asset_clip_state ON {asset}(clip_state);
@@ -205,9 +214,12 @@ def ensure_schema(conn, s):
         body=s.table("body"), run=s.table("run"), state=s.table("state"),
         vface=s.table("vface"), vclip=s.table("vclip"))
     with conn.cursor() as cur:
+        # Thu tu bat buoc: tao bang -> them cot thieu -> tao index.
+        # Index co the tham chieu cot chi xuat hien o MIGRATIONS.
         cur.execute(DDL.format(**names))
         for sql in MIGRATIONS:
             cur.execute(sql.format(**names))
+        cur.execute(INDEXES.format(**names))
     conn.commit()
 
 

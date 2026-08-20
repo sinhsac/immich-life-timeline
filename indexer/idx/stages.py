@@ -62,23 +62,56 @@ def _progress(label, n, total, t0, every=200):
           + (f"  con ~{eta / 60:.0f} phut" if eta else ""))
 
 
+# fp_asset.dur_ms la 'int' cua Postgres. Gia tri rac trong Immich (hoac doan sai
+# don vi) tung lam ca stage assets chet giua duong voi NumericValueOutOfRange,
+# keo theo rollback ca lo 1000 dong. Chan tai day thay vi de Postgres chan.
+_INT32_MAX = 2 ** 31 - 1
+
+
 def _dur_ms(v):
-    """Immich luu duration kieu interval hoac text '0:00:12.345'. Ve ms."""
+    """Do dai video -> milliseconds. None neu khong doc duoc.
+
+    Ba dang duration da gap tuy phien ban Immich:
+      - interval           -> co total_seconds()
+      - text '0:00:12.345' -> gio:phut:giay, co dau ':'
+      - integer            -> DA la milliseconds san (bang 'asset' cot integer)
+
+    Dung nham dang thu ba thanh giay la sai 1000 lan, va voi video dai thi vuot
+    luon tran int32.
+    """
     if v is None:
         return None
     if hasattr(v, "total_seconds"):
-        return int(round(v.total_seconds() * 1000))
-    txt = str(v).strip()
-    if not txt:
+        ms = v.total_seconds() * 1000.0
+    elif isinstance(v, bool):
         return None
+    elif isinstance(v, (int, float)):
+        ms = float(v)                     # cot integer: da la ms
+    else:
+        txt = str(v).strip()
+        if not txt:
+            return None
+        try:
+            parts = [float(x) for x in txt.split(":")]
+        except ValueError:
+            return None
+        if len(parts) == 1:
+            # Khong co dau ':' -> khong phai dang gio:phut:giay, hieu la ms.
+            ms = parts[0]
+        else:
+            sec = 0.0
+            for p in parts:
+                sec = sec * 60.0 + p
+            ms = sec * 1000.0
     try:
-        parts = [float(x) for x in txt.split(":")]
-    except ValueError:
+        ms = int(round(ms))
+    except (ValueError, OverflowError):
         return None
-    sec = 0.0
-    for p in parts:
-        sec = sec * 60.0 + p
-    return int(round(sec * 1000)) or None
+    if ms <= 0:
+        return None
+    # Kep vao tran int32: thua 24 ngay video thi con so khong con y nghia nua,
+    # nhung KHONG duoc phep lam sap ca stage.
+    return min(ms, _INT32_MAX)
 
 
 # ------------------------------------------------------------------ stage 1
