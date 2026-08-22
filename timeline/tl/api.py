@@ -143,7 +143,7 @@ def list_projects():
 def create_project(body: CreateProject):
     grps = body.groups()
     if not grps:
-        raise HTTPException(400, "can person_id, person_ids hoac subjects")
+        raise HTTPException(400, "person_id, person_ids or subjects is required")
     try:
         pid, res = projects.create(grps, body.name, body.date_from,
                                    body.date_to, body.filters, body.together)
@@ -162,7 +162,7 @@ def make_video(body: MakeVideo):
     """
     grps = body.groups()
     if not grps:
-        raise HTTPException(400, "can person_id, person_ids hoac subjects")
+        raise HTTPException(400, "person_id, person_ids or subjects is required")
     try:
         pid, res = projects.create(grps, body.name, body.date_from,
                                    body.date_to, body.filters, body.together)
@@ -171,8 +171,8 @@ def make_video(body: MakeVideo):
 
     out = {"project_id": pid, "render_id": None, **_slim(res, False)}
     if res["n_selected"] < 2:
-        out["detail"] = (f"chi chon duoc {res['n_selected']} anh, can it nhat 2 "
-                         f"— noi nguong loc roi thu lai")
+        out["detail"] = (f"only {res['n_selected']} photos were selected, at least "
+                         f"2 are needed — loosen the thresholds and try again")
         return out
     try:
         out["render_id"] = render.start(pid, body.options)
@@ -242,7 +242,7 @@ def thumb(asset_id: str, fidx: int, size: int = Query(160, ge=48, le=512)):
     """fidx >= 0 la khuon mat trong anh; fidx AM la doan video thu (-1-fidx)."""
     p = thumbs.face_thumb(asset_id, fidx, size)
     if p is None:
-        raise HTTPException(404, "khong doc duoc anh preview")
+        raise HTTPException(404, "could not read the preview image")
     return FileResponse(p, media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=86400"})
 
@@ -260,7 +260,7 @@ def aligned(asset_id: str, fidx: int,
                                face_frac=face_frac, eye_y=eye_y,
                                fill=fill, level=level)
     if p is None:
-        raise HTTPException(404, "khong align duoc anh nay")
+        raise HTTPException(404, "could not align this photo")
     return FileResponse(p, media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=86400"})
 
@@ -308,7 +308,7 @@ def render_status(render_id: int):
 def render_video(render_id: int):
     p = render.video_path(render_id)
     if p is None:
-        raise HTTPException(404, "video chua san sang")
+        raise HTTPException(404, "the video is not ready yet")
     return FileResponse(p, media_type="video/mp4", filename=f"timeline-{render_id}.mp4")
 
 

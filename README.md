@@ -1,166 +1,176 @@
-# Video hành trình một người, dựng từ thư viện Immich
+# One person's journey as a video, built from an Immich library
 
 [![build images](https://github.com/sinhsac/immich-plugin/actions/workflows/build-images.yml/badge.svg)](https://github.com/sinhsac/immich-plugin/actions/workflows/build-images.yml)
 [![release](https://img.shields.io/github/v/release/sinhsac/immich-plugin?sort=semver)](https://github.com/sinhsac/immich-plugin/releases/latest)
 [![license: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE.md)
 
-Chọn một người trong thư viện ảnh [Immich](https://immich.app) của bạn, công cụ
-này chia hành trình của người đó thành từng chương theo thời gian, mỗi chương lấy
-một khoảnh khắc đáng giữ nhất, neo khuôn mặt về cùng một vị trí rồi dựng thành
-một video ngắn có mở đầu, có nhịp, có kết.
+Pick one person from your [Immich](https://immich.app) library and this tool
+splits their journey into chapters over time, takes the single most worthwhile
+moment from each chapter, anchors the face to the same spot in every frame, and
+renders it into a short video with an opening, a rhythm, and an ending.
 
-Điểm khác biệt so với việc ghép ảnh thủ công: **khuôn mặt được neo cố định**.
-Nếu chỉ xếp ảnh theo thứ tự thời gian thì mặt nhảy loạn mỗi frame, không xem
-được. Ở đây mỗi frame được xoay, phóng và dịch sao cho hai mắt luôn nằm đúng một
-chỗ với cùng một kích thước.
+What makes it different from stitching photos together by hand: **the face stays
+anchored**. Order photos by date alone and the face jumps around every frame,
+which is unwatchable. Here every frame is rotated, scaled, and shifted so the two
+eyes always land on the same position at the same size.
 
-Và quan trọng: **neo không có nghĩa là crop sát mặt**. Khuôn mặt chỉ là điểm
-neo, còn khung hình vẫn giữ bối cảnh — cả người, cảnh vật, những người xung
-quanh. Đó là thứ làm video có cảm xúc thay vì thành dãy ảnh thẻ.
+And this matters: **anchoring is not the same as cropping tight on the face**. The
+face is only the anchor point; the frame still keeps the context — the whole
+person, the surroundings, the people nearby. That is what gives the video feeling
+instead of turning it into a row of ID photos.
 
-## Kể chuyện, không phải băng ảnh
+## Storytelling, not a photo reel
 
-Bản đầu tiên rải ảnh đều tuyệt đối rồi cho mỗi ảnh 1/6 giây. Ra một băng ảnh chạy
-từ đầu đến cuối, mọi frame quan trọng như nhau, mặt đổi liên tục — xem mười giây
-là mệt, vì không có chỗ nào để mắt nghỉ và không gì phân biệt một buổi chiều bình
-thường với ngày tốt nghiệp.
+The first version spread photos perfectly evenly and gave each one 1/6 of a
+second. The result was a reel running start to finish where every frame mattered
+equally and the face changed constantly — ten seconds in you were tired, because
+there was nowhere for the eye to rest and nothing distinguished an ordinary
+afternoon from a graduation day.
 
-Bây giờ mặc định là chế độ **kể chuyện**:
+The default is now **storytelling** mode:
 
-- **Bạn không đặt gì cả.** Yêu cầu chỉ gồm *ai* và (tuỳ chọn) *khoảng thời gian
-  nào*. Độ dài là **kết quả**: chương nào nhiều ảnh thì dày hơn, hành trình dài
-  thì nhiều chương hơn, và tổng bị chặn trong 16–150 giây để không bao giờ ra một
-  video 20 phút. Xem xong có hai nút *Ngắn hơn / Dài hơn* để phản ứng với cái đã
-  thấy, thay vì đoán một con số trước khi thấy gì.
-- **Chia chương theo thời gian** (hai năm / năm / nửa năm / quý / tháng — tự chọn
-  mức mịn nhất còn vừa thời lượng). Mỗi chương mở ra bằng một nhãn thời gian hiện
-  lên rồi tan đi.
-- **Mỗi chương có một ảnh điểm nhấn** giữ lâu gần gấp đôi ảnh phụ. Đây là thứ tạo
-  ra nhịp; chia chương mà thiếu nó thì vẫn là băng ảnh.
-- **Mỗi chương luôn được ít nhất một ảnh.** Phủ kín thời gian đáng giá hơn độ dày:
-  mất một năm khỏi video là mất một đoạn câu chuyện.
-- **Chồng mờ giữa các ảnh**, mở màn từ đen, đóng màn về đen, thẻ tiêu đề mở đầu
-  với tên và khoảng năm.
-- **Zoom rất chậm trong từng ảnh** — nhưng zoom *quanh điểm giữa hai mắt*, nên
-  khuôn mặt không hề xê dịch, chỉ bối cảnh rộng ra hẹp vào. Neo vẫn là neo, khung
-  hết bất động.
-- **Có cả đoạn video thật, kèm tiếng.** Job indexer quét từng frame video trong
-  thư viện, tìm đúng người bạn chọn, rồi cắt ra đoạn đẹp nhất — đủ nét, đủ sáng,
-  mặt đủ to, không rung, và có bối cảnh. Mỗi chương có đoạn thì được giành một
-  suất, vì một đoạn động đáng giá hơn một bức ảnh đẹp hơn nó một chút. Tiếng vào
-  *trước* hình và còn lại *sau* khi hình đã cắt, nên nghe như sống lại khoảnh khắc
-  chứ không như chèn tiếng vào.
-- **Khuôn mặt trong đoạn video cũng được neo.** Người trong khung cử động, còn
-  khung thì không: indexer lưu đường đi của khuôn mặt qua từng mốc, bước dựng nội
-  suy giữa hai mốc gần nhất.
+- **You set nothing.** The request is just *who* and (optionally) *what date
+  range*. Duration is an **outcome**: chapters with more photos get more screen
+  time, a longer journey gets more chapters, and the total is clamped to 16–150
+  seconds so you never end up with a 20-minute video. Once you have watched it,
+  two buttons — *Shorter / Longer* — let you react to what you actually saw
+  instead of guessing a number before seeing anything.
+- **Chapters split by time** (two years / year / half-year / quarter / month — it
+  picks the finest granularity that still fits the duration). Each chapter opens
+  with a time label that fades in and out.
+- **Every chapter has one hero shot** held nearly twice as long as the supporting
+  shots. This is what creates the rhythm; split into chapters without it and you
+  still have a photo reel.
+- **Every chapter always gets at least one photo.** Covering the whole span is
+  worth more than density: losing a year from the video means losing a piece of
+  the story.
+- **Cross-fades between shots**, fade in from black, fade out to black, and an
+  opening title card with the name and the year range.
+- **A very slow zoom within each shot** — but the zoom is centred *on the midpoint
+  between the eyes*, so the face does not drift at all; only the context widens
+  and narrows. The anchor stays an anchor, the frame never goes static and dead.
+- **Real video clips too, with sound.** The indexer job scans every video frame in
+  the library, finds the person you picked, then cuts out the best clip — sharp
+  enough, bright enough, face large enough, no shake, and with context. Any
+  chapter that has a clip gets one slot for it, because a moving clip is worth
+  more than a photo that is only marginally better. The audio comes in *before*
+  the picture and lingers *after* the picture has cut away, so it feels like
+  reliving the moment rather than having sound pasted on top.
+- **Faces inside video clips are anchored too.** The person moves inside the
+  frame, the frame does not: the indexer stores the path the face travels through
+  a series of samples, and the render step interpolates between the two nearest
+  samples.
 
-Kiểu flipbook cũ vẫn còn nguyên nếu bạn thích: đổi sang chế độ *Rải đều* ở bước 3
-và 4. Chi tiết tham số ở [`timeline/README.md`](timeline/README.md).
+The old flipbook style is still there if you prefer it: switch to *Even spread*
+mode in steps 3 and 4. Parameter details are in
+[`timeline/README.md`](timeline/README.md).
 
-## Ý tưởng cốt lõi: không làm lại việc Immich đã làm
+## Core idea: do not redo the work Immich already did
 
-Immich đã chạy Face Detection và Facial Recognition trên thư viện của bạn, và
-lưu vào Postgres bbox từng khuôn mặt, vector ArcFace, và người đó là ai. Đó là
-phần tốn kém nhất của bài toán.
+Immich has already run Face Detection and Facial Recognition across your library,
+and stored in Postgres the bbox of every face, the ArcFace vector, and who that
+person is. That is the expensive part of the problem.
 
-Công cụ này **đọc lại kết quả đó** thay vì tự detect. Nhờ vậy bỏ được hai model
-nặng nhất (SCRFD và ArcFace) và chỉ chạy thêm hai model nhẹ cho phần Immich
-không có:
+This tool **reads those results back** instead of detecting anything itself. That
+drops the two heaviest models (SCRFD and ArcFace) and runs only two light models
+for the parts Immich does not cover:
 
-| Việc | Model | Ai làm |
+| Task | Model | Who does it |
 |---|---|---|
-| Tìm mặt trong **ảnh**, vector nhận dạng | SCRFD + ArcFace | **Immich** đã làm, chỉ copy kết quả |
-| Hướng đầu, 68 điểm 3D | `1k3d68` trong `buffalo_l` | công cụ này |
-| Tư thế cơ thể, 17 keypoint | `yolov8n-pose` | công cụ này |
-| Tìm mặt trong **video** theo thời gian | `det_10g` + `w600k_r50` | công cụ này |
-| Neo mặt để dựng video | không cần model | dùng lại `kps` đã lưu |
+| Find faces in **photos**, recognition vector | SCRFD + ArcFace | **Immich** already did it, just copy the results |
+| Head pose, 68 3D landmarks | `1k3d68` in `buffalo_l` | this tool |
+| Body pose, 17 keypoints | `yolov8n-pose` | this tool |
+| Find faces in **video** over time | `det_10g` + `w600k_r50` | this tool |
+| Anchor the face for rendering | no model needed | reuses the stored `kps` |
 
-Hàng thứ tư là ngoại lệ duy nhất, và có lý do cụ thể: Immich chỉ chạy face
-detection cho video trên **đúng một frame thumbnail**. Biết một clip có ông A là
-đủ để liệt kê, nhưng không đủ để cắt ra "đoạn đẹp nhất có ông A". Điểm nhẹ nhõm là
-hai model đó **đã nằm sẵn trong bộ `buffalo_l`** mà bước tải model kéo về — từ
-trước giờ chỉ không dùng đến. Không phải tải thêm gì.
+The fourth row is the only exception, and there is a specific reason for it:
+Immich runs face detection on video against **exactly one thumbnail frame**.
+Knowing that a clip contains person A is enough to list it, but not enough to cut
+out "the best clip containing person A". The good news is that those two models
+**already ship inside the `buffalo_l` bundle** the model download step pulls —
+they simply went unused until now. Nothing extra to download.
 
-Toàn bộ dữ liệu mới ghi vào **bảng riêng prefix `fp_`** trong chính database của
-Immich. Bảng của Immich **chỉ đọc, không bao giờ bị ghi**.
+All new data is written to **separate tables prefixed `fp_`** inside Immich's own
+database. Immich's own tables are **read-only and never written to**.
 
-## Cần gì trước khi bắt đầu
+## What you need before starting
 
-- Immich đang chạy, và **đã chạy xong Facial Recognition** (Administration →
-  Jobs). Chưa xong thì chưa có gì để đọc.
-- Truy cập được Postgres của Immich (cùng máy hoặc qua mạng).
-- Thư mục `UPLOAD_LOCATION` của Immich để mount read-only — hoặc một API key nếu
-  không mount được.
-- `ffmpeg` — đã có sẵn trong image, không phải cài.
+- Immich running, with **Facial Recognition already finished** (Administration →
+  Jobs). Until it finishes there is nothing to read.
+- Access to Immich's Postgres (same machine or over the network).
+- Immich's `UPLOAD_LOCATION` directory to mount read-only — or an API key if you
+  cannot mount it.
+- `ffmpeg` — already in the image, nothing to install.
 
-Không cần GPU. Thiết kế nhằm vào máy yếu: 4 core, 8GB RAM, chạy chung với Immich.
+No GPU required. The design targets modest machines: 4 cores, 8GB RAM, running
+alongside Immich.
 
-## Hai thành phần
+## Two components
 
-| Thư mục | Loại | Việc |
+| Directory | Type | Job |
 |---|---|---|
-| [`indexer/`](indexer/) | job chạy định kỳ | Quét ảnh Immich, index hướng đầu + tư thế vào Postgres |
-| [`timeline/`](timeline/) | web service | UI 4 bước: chọn người → lấy ảnh → tinh chỉnh → dựng video |
+| [`indexer/`](indexer/) | periodic job | Scans Immich photos, indexes head pose + body pose into Postgres |
+| [`timeline/`](timeline/) | web service | 4-step UI: pick person → collect photos → tune → render video |
 
 ```
-Immich (đã chạy Facial Recognition)
+Immich (Facial Recognition already run)
         │
-        ├─ indexer — chạy một lần, rồi định kỳ cho ảnh mới
-        │    1 assets     → fp_asset   danh sách ảnh + video + ngày chụp
-        │    2 faces      → fp_face    bbox + vector, copy từ Immich
-        │    3 landmarks  → fp_face    yaw/pitch/roll, chất lượng, điểm neo
-        │    4 bodies     → fp_body    17 keypoint, tư thế, hướng thân
-        │    5 clips      → fp_vface   quét frame video, tìm người
-        │                  fp_vclip    cắt ra đoạn đẹp nhất + đường đi của mặt
+        ├─ indexer — run once, then periodically for new photos
+        │    1 assets     → fp_asset   list of photos + videos + capture dates
+        │    2 faces      → fp_face    bbox + vector, copied from Immich
+        │    3 landmarks  → fp_face    yaw/pitch/roll, quality, anchor point
+        │    4 bodies     → fp_body    17 keypoints, posture, torso orientation
+        │    5 clips      → fp_vface   scan video frames, find the person
+        │                  fp_vclip    cut the best clip + the face path
         │
-        └─ timeline — service thường trú
-             chọn người (+ khoảng ngày)  →  VIDEO
-               tự suy ngưỡng · chia chương · tự suy độ dài · neo mặt · ffmpeg
+        └─ timeline — long-running service
+             pick person (+ date range)  →  VIDEO
+               infer thresholds · split chapters · infer duration · anchor face · ffmpeg
 
-             công tắc "Chuyên gia" mở lại từng khâu:
-             1 chọn cụm     một người nhiều cụm, hoặc nhiều người
-             2 ảnh đã chọn  phân bố theo năm và theo chương
-             3 ngưỡng lọc   kéo ngưỡng, mỗi ảnh bị loại đều có lý do
-             4 thông số     xem cấu trúc chuyện + thời lượng thật rồi mới dựng
+             the "Expert" switch reopens each stage:
+             1 pick clusters   one person across many clusters, or many people
+             2 chosen photos   distribution by year and by chapter
+             3 thresholds      drag the thresholds, every rejected photo has a reason
+             4 parameters      inspect the story structure + real duration before rendering
 ```
 
-## Chạy bằng Docker Compose
+## Running with Docker Compose
 
-Cách nhanh nhất. Image build sẵn trên GHCR, không phải build gì.
+The fastest route. Images are prebuilt on GHCR, nothing to build.
 
 ```bash
 git clone https://github.com/sinhsac/immich-plugin.git
 cd immich-plugin
 cp .env.example .env
-# Sua .env: PG_PASSWORD va UPLOAD_LOCATION (hoac IMMICH_URL + IMMICH_API_KEY)
+# Edit .env: PG_PASSWORD and UPLOAD_LOCATION (or IMMICH_URL + IMMICH_API_KEY)
 
-# 1. Tai model — chay mot lan, khoang 300MB
+# 1. Download models — runs once, about 300MB
 docker compose --profile setup up
 
-# 2. Quét thư viện. Lần đầu lâu: vài giờ cho vài chục nghìn ảnh trên CPU.
-#    Dừng giữa đường không mất gì, chạy lại là tiếp tục chỗ cũ.
+# 2. Scan the library. The first run is slow: a few hours for tens of thousands of photos on CPU.
+#    Stopping midway loses nothing, rerun and it picks up where it left off.
 docker compose run --rm indexer
 
-# 3. Mở UI
+# 3. Open the UI
 docker compose up -d timeline
 # http://localhost:8080
 ```
 
-Kiểm tra trước khi quét thật:
+Check things before a real scan:
 
 ```bash
-docker compose run --rm indexer --dry-run   # thử pg, thử đọc ảnh, thử load model
-docker compose run --rm indexer --stats     # xem tiến độ
+docker compose run --rm indexer --dry-run   # test pg, test reading photos, test loading models
+docker compose run --rm indexer --stats     # show progress
 ```
 
-Ảnh mới upload vào Immich về sau chỉ cần chạy lại `docker compose run --rm
-indexer` — nó chỉ xử lý phần chưa có, không làm lại từ đầu.
+For photos uploaded to Immich later, just run `docker compose run --rm indexer`
+again — it only processes what is missing rather than starting over.
 
-## Chạy trên Kubernetes / k3s
+## Running on Kubernetes / k3s
 
-Manifest mẫu trong [`indexer/deploy/k3s.yaml`](indexer/deploy/k3s.yaml) và
-[`timeline/deploy/k3s.yaml`](timeline/deploy/k3s.yaml). Sửa `hostPath` cho đúng
-máy bạn rồi:
+Sample manifests are in [`indexer/deploy/k3s.yaml`](indexer/deploy/k3s.yaml) and
+[`timeline/deploy/k3s.yaml`](timeline/deploy/k3s.yaml). Fix `hostPath` for your
+machine, then:
 
 ```bash
 kubectl create ns media
@@ -168,125 +178,136 @@ kubectl -n media create secret generic immich-db --from-literal=password='...'
 kubectl apply -f indexer/deploy/k3s.yaml
 kubectl apply -f timeline/deploy/k3s.yaml
 
-# Chạy quét ngay, không đợi lịch
+# Run a scan right now, without waiting for the schedule
 kubectl -n media create job --from=cronjob/fp-indexer fp-run-1
 kubectl -n media logs -f job/fp-run-1
 ```
 
-`indexer` là CronJob (`concurrencyPolicy: Forbid`), `timeline` là Deployment một
-replica với `strategy: Recreate` — render ghi vào volume nên hai pod sẽ đạp nhau.
+`indexer` is a CronJob (`concurrencyPolicy: Forbid`), `timeline` is a
+single-replica Deployment with `strategy: Recreate` — renders write into a volume,
+so two pods would trample each other.
 
-## Image
+## Images
 
 ```
 ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
 ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
 ```
 
-Các tag có sẵn:
+Available tags:
 
-| Tag | Nghĩa |
+| Tag | Meaning |
 |---|---|
-| `latest` | build mới nhất trên `main` |
-| `1.2.3` | phiên bản release, **nên dùng cho máy chạy thật** |
-| `v1.2.3` | cùng bản đó, giữ nguyên chữ `v` |
-| `sha-<commit>` | ghim chính xác một commit |
+| `latest` | newest build on `main` |
+| `1.2.3` | released version, **use this for real deployments** |
+| `v1.2.3` | same build, keeping the `v` prefix |
+| `sha-<commit>` | pin to an exact commit |
 
-Dùng `latest` thì phải đặt `imagePullPolicy: Always`. Để `IfNotPresent` là node
-thấy đã có `latest` trong cache rồi dùng mãi, build mới không bao giờ tới máy —
-`latest` thành vô nghĩa. Ghim theo phiên bản thì ngược lại: `IfNotPresent` mới
-đúng, vì tag bất biến nên không cần hỏi registry mỗi lần khởi động.
+If you use `latest` you must set `imagePullPolicy: Always`. With `IfNotPresent`
+the node sees it already has `latest` cached and keeps using it forever, so new
+builds never reach the machine — `latest` becomes meaningless. Pinning to a
+version is the opposite: `IfNotPresent` is the right choice, because the tag is
+immutable so there is no need to ask the registry on every startup.
 
-Nếu bạn fork, nhớ đổi package sang **public** ở Packages → Package settings, vì
-GHCR để private kể cả với repo public.
+If you fork, remember to switch the package to **public** under Packages →
+Package settings, since GHCR defaults to private even for public repos.
 
-Muốn tự build:
+To build them yourself:
 
 ```bash
 DOCKER_BUILDKIT=1 docker build -f indexer/deploy/Dockerfile -t fp-indexer indexer/
 DOCKER_BUILDKIT=1 docker build -f timeline/deploy/Dockerfile -t fp-timeline timeline/
 ```
 
-`insightface` không phát hành wheel nên phải compile từ source — image indexer
-dùng multi-stage, compiler chỉ nằm ở stage build.
+`insightface` publishes no wheels, so it has to be compiled from source — the
+indexer image is multi-stage, with the compiler confined to the build stage.
 
-## Cách dùng: chọn người, bấm một nút
+## How to use it: pick a person, press one button
 
-Yêu cầu chỉ gồm **ai** và (tuỳ chọn) **khoảng thời gian nào**:
+The request is just **who** and (optionally) **what date range**:
 
-- video của ông A → chọn các cụm của ông A, bấm *Tạo video*
-- video của ông A với bà B → chọn cụm của A, bấm *+ Thêm người nữa*, chọn cụm của
-  B. Tích *chỉ ảnh có mặt đủ tất cả* nếu muốn riêng ảnh chụp chung
-- video của ông A từ 1/1/2000 đến 12/12/2020 → thêm hai ô ngày
+- a video of person A → select A's clusters, press *Create video*
+- a video of person A with person B → select A's clusters, press *+ Add another
+  person*, select B's clusters. Tick *only photos containing everyone* if you want
+  just the photos of them together
+- a video of person A from 2000-01-01 to 2020-12-12 → add the two date fields
 
-Không có thanh trượt nào trên đường này. Service tự suy ngưỡng lọc, chia chương,
-tự suy độ dài và dựng luôn.
+There is not a single slider on this path. The service infers the thresholds,
+splits the chapters, infers the duration, and renders straight away.
 
-## Bốn bước, sau công tắc "Chuyên gia"
+## Four steps, behind the "Expert" switch
 
-Bật công tắc ở góc trên để mở lại từng khâu. Tắt thì chúng không xuất hiện trên
-giao diện.
+Flip the switch in the top corner to reopen each stage. With it off, they do not
+appear in the interface at all.
 
-**1. Chọn người.** Danh sách lấy từ cụm khuôn mặt Immich đã phân loại. Immich
-thường tách **một người thành nhiều cụm** ở các mốc tuổi khác nhau — bé, thiếu
-niên, trưởng thành thành ba cụm riêng. Chọn được nhiều cụm cùng lúc, và nút "Tìm
-cụm cùng người" so vector trung tâm để gợi ý thêm, chọn thêm rồi tìm lại là lan
-rộng dần.
+**1. Pick the person.** The list comes from the person clusters Immich already
+classified. Immich usually splits **one person into several clusters** across
+different ages — child, teenager, adult end up as three separate clusters. You can
+select several clusters at once, and the "Find clusters of the same person" button
+compares centroid vectors to suggest more; select those too and search again to
+widen the net step by step.
 
-Cảnh báo thật: cosine một mình **không tách được người thân**. Trên một thư viện
-thật, cụm cùng người đạt 0,55 còn một người khác trong nhà đạt 0,44 — biên rất
-hẹp. Vì vậy cụm nào đã được đặt **tên khác** sẽ bị đánh dấu và đẩy xuống cuối,
-tín hiệu đó đáng tin hơn con số. Vẫn phải nhìn ảnh rồi mới chọn.
+An honest warning: cosine similarity alone **cannot separate close relatives**. On
+a real library, a cluster of the same person scored 0.55 while a different person
+in the same household scored 0.44 — the margin is very thin. So any cluster that
+already carries a **different name** is flagged and pushed to the bottom; that
+signal is more trustworthy than the number. You still have to look at the photos
+before choosing.
 
-**2. Lấy ảnh tự động.** Chia thời gian thành chương rồi phân bổ ngân sách thời
-lượng cho từng chương. Không làm vậy thì một chuyến du lịch 200 ảnh chiếm hết
-video, còn những năm ít ảnh mất hẳn.
+**2. Collect photos automatically.** Time is split into chapters, then a duration
+budget is allocated per chapter. Without that, one 200-photo holiday takes over the
+whole video and the sparse years disappear entirely.
 
-**3. Tinh chỉnh.** Đặt độ dài mong muốn, nhịp kể, một chương là bao lâu. Kéo
-ngưỡng góc đầu, độ nét, độ sáng, tư thế. Ảnh vào video được **nhóm theo chương**
-và ảnh điểm nhấn có dấu riêng, nên thấy ngay chương nào mỏng. **Mỗi ảnh bị loại
-đều hiện lý do cụ thể**, nên biết phải nới ngưỡng nào chứ không phải đoán.
+**3. Tune.** Set the target length, the pacing, how long a chapter runs. Drag the
+thresholds for head angle, sharpness, brightness, posture. The photos entering the
+video are **grouped by chapter** with the hero shot marked distinctly, so you see
+immediately which chapter is thin. **Every rejected photo shows a concrete
+reason**, so you know which threshold to loosen instead of guessing.
 
-**4. Dựng video.** Xem cấu trúc câu chuyện với **thời lượng thật đến từng frame**
-trước khi render, xem trước ba khung cách xa nhau về thời gian, rồi dựng thành
-mp4.
+**4. Render the video.** Review the story structure with the **real duration down
+to the frame** before rendering, preview three frames spread far apart in time,
+then render to mp4.
 
-## Khung hình: tham số quan trọng nhất
+## Framing: the single most important parameter
 
-`face_frac` là khoảng cách hai mắt tính theo chiều ngang khung ra:
+`face_frac` is the distance between the eyes expressed as a fraction of the frame
+width:
 
-| `face_frac` | Kết quả |
+| `face_frac` | Result |
 |---|---|
-| 0,50–0,60 | Chân dung sát mặt, mất hết bối cảnh |
-| **0,10–0,15** | Thấy cả người và bối cảnh — **mặc định** |
-| 0,06–0,08 | Toàn cảnh, người nhỏ |
+| 0.50–0.60 | Tight portrait, all context lost |
+| **0.10–0.15** | Whole person and context visible — **default** |
+| 0.06–0.08 | Wide shot, person small |
 
-Vì mọi frame dùng cùng `face_frac` và cùng `eye_y`, khuôn mặt nằm đúng một chỗ
-với cùng độ lớn xuyên suốt video.
+Because every frame uses the same `face_frac` and the same `eye_y`, the face sits
+in exactly one place at exactly one size throughout the video.
 
-Ảnh không đủ lớn để phủ kín khung thì hàm tự phóng to thêm. Khi buộc phải chọn
-giữa "đúng điểm neo" và "không có viền trống", nó ưu tiên phủ kín — mặt lệch khỏi
-`eye_y` một chút. Đổi sang `fill=blur` nếu muốn giữ trọn khung ảnh và chấp nhận
-nền mờ ở phần thiếu.
+If a photo is not large enough to cover the frame, the function scales it up
+further. When it has to choose between "exact anchor point" and "no empty
+borders", it prioritises covering the frame — the face drifts slightly off
+`eye_y`. Switch to `fill=blur` if you would rather keep the full photo and accept
+a blurred background in the missing area.
 
-Ảnh có nhiều người vẫn neo theo đúng người bạn chọn, vì điểm neo lấy từ khuôn mặt
-cụ thể trong `fp_face` chứ không phải mặt bất kỳ.
+Photos with several people are still anchored on the person you picked, because
+the anchor point comes from the specific face in `fp_face` rather than from any
+face.
 
-## Bảng dữ liệu
+## Data tables
 
-Prefix mặc định `fp_`, đổi bằng `TABLE_PREFIX`.
+The default prefix is `fp_`; change it with `TABLE_PREFIX`.
 
-| Bảng | Nội dung |
+| Table | Contents |
 |---|---|
-| `fp_asset` | một dòng mỗi ảnh: ngày chụp, đường dẫn preview, trạng thái xử lý |
-| `fp_face` | một dòng mỗi mặt: bbox, vector, yaw/pitch/roll, chất lượng, điểm neo |
-| `fp_body` | một dòng mỗi người: 17 keypoint, tư thế, hướng thân |
-| `fp_vface` | một dòng mỗi mặt khớp được với một người, trên mỗi frame video đã quét |
-| `fp_vclip` | đoạn video đã chọn: người, khoảng thời gian, điểm, đường đi của mặt |
-| `fp_project` | dự án video: người + bộ ngưỡng + danh sách frame kèm chương và ảnh điểm nhấn |
-| `fp_run` | log mỗi lần chạy stage |
+| `fp_asset` | one row per photo: capture date, preview path, processing state |
+| `fp_face` | one row per face: bbox, vector, yaw/pitch/roll, quality, anchor point |
+| `fp_body` | one row per person: 17 keypoints, posture, torso orientation |
+| `fp_vface` | one row per face matched to a person, on each scanned video frame |
+| `fp_vclip` | the chosen video clip: person, time range, score, face path |
+| `fp_project` | video project: people + threshold set + frame list with chapters and hero shots |
+| `fp_run` | log of every stage run |
 
-Ví dụ truy vấn trực tiếp — ảnh có đúng một người, đứng chính diện, mặt nét:
+An example of querying it directly — photos with exactly one person, facing
+forward, face sharp:
 
 ```sql
 SELECT a.id, a.taken_at, f.quality, b.posture
@@ -299,101 +320,114 @@ WHERE a.n_body = 1
 ORDER BY a.taken_at;
 ```
 
-## Chạy được trên máy yếu
+## Runs on modest hardware
 
-Thiết kế cho máy 8GB RAM / CPU 4 core / không GPU, dùng chung với Immich:
+Designed for a machine with 8GB RAM / 4 CPU cores / no GPU, shared with Immich:
 
-- Indexer tuần tự hoàn toàn, không thread, không process pool
-- **Chỉ một model trong RAM tại một thời điểm** — stage 3 giải phóng model trước
-  khi stage 4 load model khác. RAM đỉnh khoảng 700MB
-- `ONNX_THREADS=2` giới hạn cả onnxruntime lẫn BLAS
-- `SLEEP_MS` nghỉ giữa mỗi ảnh để nhường CPU cho Immich
-- Timeline **không load model nào** (neo dùng `kps` đã lưu) nên chỉ ~300MB RAM
-- Chỉ cho phép một render cùng lúc
+- The indexer is fully sequential: no threads, no process pool
+- **Only one model in RAM at a time** — stage 3 releases its model before stage 4
+  loads a different one. Peak RAM is around 700MB
+- `ONNX_THREADS=2` caps both onnxruntime and BLAS
+- `SLEEP_MS` pauses between photos to give CPU back to Immich
+- The timeline service **loads no models at all** (anchoring uses the stored `kps`)
+  so it needs only ~300MB RAM
+- Only one render is allowed at a time
 
-**Resumable.** Tiến độ nằm trong cột trạng thái của `fp_asset`, commit theo lô.
-Mất điện hay bị kill thì chạy lại là tiếp tục chỗ cũ, mất nhiều nhất một lô. Nhận
-SIGTERM thì commit lô đang chạy rồi thoát gọn. Và advisory lock trong Postgres
-đảm bảo không bao giờ có hai indexer chạy song song.
+**Resumable.** Progress lives in the state column of `fp_asset`, committed per
+batch. After a power cut or a kill, rerunning picks up where it left off, losing
+at most one batch. On SIGTERM it commits the current batch and exits cleanly. And
+a Postgres advisory lock guarantees two indexers never run in parallel.
 
-## Bảo mật
+## Security
 
-Service này **xem được toàn bộ ảnh trong thư viện**. Mặc định không có xác thực
-— nó sẽ in cảnh báo và UI hiện banner vàng nếu `API_TOKEN` trống.
+This service **can see every photo in the library**. There is no authentication by
+default — it prints a warning and the UI shows a yellow banner when `API_TOKEN` is
+empty.
 
-Đặt `API_TOKEN` trước khi mở cổng ra ngoài máy của bạn. Truy cập bằng
-`?token=...` (service ghi cookie nên chỉ cần một lần) hoặc header
-`Authorization: Bearer ...`.
+Set `API_TOKEN` before exposing the port beyond your own machine. Authenticate
+with `?token=...` (the service sets a cookie, so once is enough) or the
+`Authorization: Bearer ...` header.
 
-Ingress mẫu chưa bật TLS. Đừng đưa service này ra internet mà không có TLS và
-token.
+The sample ingress does not enable TLS. Do not put this service on the internet
+without TLS and a token.
 
-## Giới hạn đã biết
+## Known limitations
 
-- **Quét video là stage đắt nhất.** Ước lượng thô trên CPU 4 core: một video 1
-  phút ở `VIDEO_FPS=2` mất 10–15 giây, nên 500 video một phút là khoảng 1,5–2 giờ.
-  Job resumable theo từng video. Không cần thì đặt `DO_VIDEO=0`.
-- **Quét video cần `MEDIA_ROOT`.** Chế độ `IMMICH_URL` không dùng được: tải cả
-  thư viện video qua HTTP chỉ để quét là không hợp lý.
-- **Giữa các đoạn video là im lặng**, vì ảnh tĩnh không có tiếng. Tiếng của từng
-  đoạn được vào trước hình và còn lại sau khi hình đã cắt để đỡ giật cục, nhưng
-  đây không phải một bản mix liền mạch. Tắt bằng `audio: false`.
-- **Ngày chụp sai thì video sai.** Ảnh không có EXIF `DateTimeOriginal` sẽ dùng
-  ngày file, dễ dồn cục vào ngày scan. Indexer in cảnh báo khi phát hiện — sửa
-  trong Immich rồi chạy lại stage `assets`.
-- **Người có ít hơn ~20 ảnh** trải theo thời gian thì chương nào cũng chỉ có một
-  ảnh, video thành slideshow chứ chưa thành chuyện.
-- **Không có nhạc nền.** Chỉ có tiếng thật của các đoạn video, không có track nhạc.
-- Render đọc ảnh **preview** của Immich (thường 1440px), không phải ảnh gốc. Đủ
-  cho khung 720–1080.
-- Hướng đầu tính bằng khớp affine 3D-3D với hình dáng trung bình của model, không
-  phải PnP có hiệu chuẩn camera. Đủ chính xác để lọc góc, không dùng để đo.
-- EAR (độ mở mắt) tính từ điểm 3D chiếu về 2D nên chỉ là tín hiệu gợi ý.
-- `posture` suy từ tỉ lệ hình học; ảnh nửa người không thấy chân có thể đoán sai.
-- Đọc ảnh qua API chậm hơn đọc file rõ rệt, và **mỗi stage tải lại toàn bộ ảnh
-  một lượt**. Mount volume nếu có thể.
+- **Video scanning is the most expensive stage.** A rough estimate on 4 CPU cores:
+  a one-minute video at `VIDEO_FPS=2` takes 10–15 seconds, so 500 one-minute
+  videos land around 1.5–2 hours. The job is resumable per video. Set
+  `DO_VIDEO=0` if you do not need it.
+- **Video scanning requires `MEDIA_ROOT`.** The `IMMICH_URL` mode cannot be used:
+  downloading the entire video library over HTTP just to scan it does not make
+  sense.
+- **There is silence between video clips**, because still photos have no sound.
+  Each clip's audio starts before its picture and lingers after the picture has
+  cut away to soften the transition, but this is not a seamless mix. Turn it off
+  with `audio: false`.
+- **Wrong capture dates mean a wrong video.** Photos without an EXIF
+  `DateTimeOriginal` fall back to the file date, which tends to clump everything
+  on the scan date. The indexer prints a warning when it detects this — fix it in
+  Immich, then rerun the `assets` stage.
+- **A person with fewer than ~20 photos** spread over time ends up with one photo
+  per chapter, which is a slideshow rather than a story.
+- **No background music.** Only the real audio from the video clips, no music
+  track.
+- The render reads Immich's **preview** images (usually 1440px), not the
+  originals. That is enough for a 720–1080 frame.
+- Head pose is computed with a 3D-3D affine fit against the model's mean shape,
+  not a camera-calibrated PnP. Accurate enough for filtering by angle, not for
+  measurement.
+- EAR (eye openness) is computed from 3D landmarks projected back to 2D, so treat
+  it as a hint only.
+- `posture` is inferred from geometric ratios; half-body photos where the legs are
+  not visible can be guessed wrong.
+- Reading photos through the API is noticeably slower than reading files, and
+  **each stage downloads the entire library again**. Mount the volume if you can.
 
-## Cấu hình chi tiết
+## Detailed configuration
 
-Toàn bộ qua biến môi trường. Xem [`indexer/README.md`](indexer/README.md) và
-[`timeline/README.md`](timeline/README.md) cho danh sách đầy đủ, các ngưỡng lọc,
-và API reference. UI cũng có OpenAPI ở `/api/docs`.
+Everything goes through environment variables. See
+[`indexer/README.md`](indexer/README.md) and
+[`timeline/README.md`](timeline/README.md) for the full list, the filter
+thresholds, and the API reference. The UI also serves OpenAPI at `/api/docs`.
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE.md) — miễn phí cho mọi mục đích
-**phi thương mại**.
+[PolyForm Noncommercial License 1.0.0](LICENSE.md) — free for any
+**noncommercial** purpose.
 
-**Được phép:** dùng cho cá nhân và gia đình, học tập, nghiên cứu, dự án sở thích;
-tải về sửa đổi thoải mái; phân phối lại bản đã sửa; dùng trong trường học, tổ
-chức từ thiện, viện nghiên cứu công, cơ quan nhà nước.
+**Allowed:** personal and family use, study, research, hobby projects; modify it
+freely; redistribute your modified version; use in schools, charities, public
+research institutes, and government agencies.
 
-**Không được phép:** bán, cho thuê, tính phí, dùng trong sản phẩm hay dịch vụ
-thương mại, hoặc bất cứ việc gì nhằm mục đích kinh doanh.
+**Not allowed:** selling it, renting it, charging for it, using it in a commercial
+product or service, or anything done for business purposes.
 
-Điều kiện phi thương mại **áp dụng cả cho bản sửa đổi**: license này chỉ cấp
-quyền cho mục đích phi thương mại, nên ai nhận lại từ bạn cũng chỉ có đúng quyền
-đó — không ai có thể fork rồi đổi sang giấy phép cho phép bán.
+The noncommercial condition **applies to modified versions as well**: this license
+only grants rights for noncommercial purposes, so whoever receives it from you
+gets exactly the same rights — nobody can fork it and relicense it under terms
+that permit selling.
 
-Muốn dùng thương mại thì mở một issue để trao đổi.
+If you want commercial use, open an issue to discuss it.
 
-### Ba điều nên biết trước khi fork
+### Three things to know before forking
 
-**Đây không phải open source theo định nghĩa OSI.** Các giấy phép giới hạn phi
-thương mại không được OSI phê duyệt, và GitHub sẽ hiện là "Other" thay vì tên
-license. Ai chỉ nhận giấy phép OSI sẽ không dùng được project này. Đó là cái giá
-của điều kiện phi thương mại, không phải nhược điểm có thể sửa.
+**This is not open source by the OSI definition.** Licenses with a noncommercial
+restriction are not OSI-approved, and GitHub will display "Other" instead of a
+license name. Anyone who only accepts OSI licenses will not be able to use this
+project. That is the price of the noncommercial condition, not a flaw that can be
+fixed.
 
-**Vì sao PolyForm mà không phải CC BY-NC-SA.** Chính Creative Commons
-[khuyến nghị không dùng giấy phép CC cho phần mềm](https://creativecommons.org/faq/#can-i-apply-a-creative-commons-license-to-software):
-chúng không cấp quyền bằng sáng chế và không xử lý chuyện phân phối mã nguồn hay
-bản biên dịch. PolyForm do các luật sư về giấy phép soạn riêng cho phần mềm, có
-điều khoản bằng sáng chế, và viết bằng ngôn ngữ dễ đọc.
+**Why PolyForm and not CC BY-NC-SA.** Creative Commons itself
+[recommends against using CC licenses for software](https://creativecommons.org/faq/#can-i-apply-a-creative-commons-license-to-software):
+they grant no patent rights and say nothing about distributing source versus
+compiled binaries. PolyForm was drafted by licensing lawyers specifically for
+software, includes a patent clause, and is written in plain language.
 
-**Không có điều khoản ShareAlike.** License này ràng buộc *mục đích sử dụng*, chứ
-không buộc công khai mã nguồn. Ai đó có thể sửa riêng mà không chia sẻ lại, miễn
-là phi thương mại. Nếu bạn cần buộc họ công khai thay đổi thì license này không
-làm được điều đó.
+**There is no ShareAlike clause.** This license constrains *how you may use it*,
+not whether you publish source. Someone can modify it privately and never share
+back, as long as they stay noncommercial. If you need to force them to publish
+their changes, this license will not do that for you.
 
-*Nội dung mục này diễn giải lại từ các nguồn được dẫn link, không phải văn bản
-pháp lý. Bản có hiệu lực là [LICENSE.md](LICENSE.md).*
+*This section paraphrases the linked sources and is not a legal document. The
+binding text is [LICENSE.md](LICENSE.md).*

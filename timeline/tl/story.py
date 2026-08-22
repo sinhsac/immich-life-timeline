@@ -50,11 +50,11 @@ PERIOD_DAYS = {"years2": 730.5, "year": 365.25, "half": 182.6,
 # khong ra mot tien trinh.
 MIN_DENSITY = 0.4
 GRAIN_LABEL = {
-    "years2": "hai nam mot chuong",
-    "year": "moi nam mot chuong",
-    "half": "nua nam mot chuong",
-    "quarter": "mot quy mot chuong",
-    "month": "moi thang mot chuong",
+    "years2": "two years per chapter",
+    "year": "one year per chapter",
+    "half": "half a year per chapter",
+    "quarter": "one quarter per chapter",
+    "month": "one month per chapter",
 }
 
 # So chuong hop ly cho mot video ke chuyen. It hon 3 thi khong thanh chuong,
@@ -94,9 +94,8 @@ def iso(v):
 
 
 # -------------------------------------------------------------------- chuong
-_MONTH_VN = ("", "Tháng 1", "Tháng 2", "Tháng 3", "Tháng 4", "Tháng 5",
-             "Tháng 6", "Tháng 7", "Tháng 8", "Tháng 9", "Tháng 10",
-             "Tháng 11", "Tháng 12")
+_MONTH = ("", "January", "February", "March", "April", "May", "June", "July",
+          "August", "September", "October", "November", "December")
 
 
 def chapter_key(v, grain):
@@ -104,13 +103,13 @@ def chapter_key(v, grain):
     d = dt(v)
     y, m = d.year, d.month
     if grain == "month":
-        return (y, m), f"{_MONTH_VN[m]} {y}"
+        return (y, m), f"{_MONTH[m]} {y}"
     if grain == "quarter":
         q = (m - 1) // 3 + 1
-        return (y, q), f"{y} · quý {q}"
+        return (y, q), f"{y} · Q{q}"
     if grain == "half":
         h = 0 if m <= 6 else 1
-        return (y, h), f"{y} · nửa {'đầu' if h == 0 else 'sau'}"
+        return (y, h), f"{y} · {'first' if h == 0 else 'second'} half"
     if grain == "years2":
         y0 = y - (y % 2)
         return (y0, 0), f"{y0}–{y0 + 1}"
@@ -380,7 +379,15 @@ def build(passed, cfg=None, hard_cap=10_000):
     """
     p = plan(cfg)
     if not passed:
-        return [], [], {"plan": p, "chapters": [], "grain": p["chapter_by"]}
+        # Phai tra ve DU cac khoa nhu duong thanh cong: siet nguong den muc
+        # khong con anh nao dat la mot truong hop that, va _story_info() doc
+        # thang cac khoa nay -> thieu mot cai la 500 thay vi "0 anh duoc chon".
+        grain = p["chapter_by"] if p["chapter_by"] != "auto" else "year"
+        return [], [], {"plan": p, "chapters": [], "grain": grain,
+                        "grain_label": GRAIN_LABEL.get(grain, grain),
+                        "capped": False, "exhausted": False,
+                        "auto": p["auto_budget"], "n_clip": 0,
+                        "seconds": 0.0}
 
     grain = p["chapter_by"]
     if grain == "auto":
@@ -423,7 +430,7 @@ def build(passed, cfg=None, hard_cap=10_000):
     ceiling = (MAX_SECONDS if p["auto_budget"] else p["budget"])
     kept, over, secs = trim_to(kept, p, ceiling)
     for r in over:
-        r["reason"] = f"vuot tran thoi luong {ceiling:.0f}s"
+        r["reason"] = f"over the {ceiling:.0f}s duration ceiling"
     dropped.extend(over)
     n_clip = sum(1 for r in kept if r.get("kind") == "clip")
     for ch in summary:

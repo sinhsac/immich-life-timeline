@@ -164,10 +164,11 @@ def indexer_ready():
             n_kps = cur.fetchone()[0]
         c.rollback()
     if not n_face:
-        return False, "fp_face chua co dong nao state=1 - chay stage landmarks"
+        return False, "fp_face has no rows with state=1 - run the landmarks stage"
     if not n_kps:
-        return False, "fp_face khong co kps - khong align duoc, chay lai landmarks"
-    return True, f"{n_face} face san sang, {n_kps} co landmark"
+        return False, ("fp_face has no kps - cannot align, rerun the landmarks "
+                       "stage")
+    return True, f"{n_face} faces ready, {n_kps} with landmarks"
 
 
 _PROGRESS = """
@@ -198,7 +199,7 @@ def progress():
             (s.pg_schema, f"{s.prefix}asset"))
         if cur.fetchone() is None:
             c.rollback()
-            return {"ready": False, "detail": "chua co bang fp_asset"}
+            return {"ready": False, "detail": "no fp_asset table yet"}
 
         cur.execute(_PROGRESS.format(asset=s.table("asset")))
         p = dict(cur.fetchone())
@@ -230,7 +231,7 @@ def progress():
     total = max(1, p["n_asset"])
     p["stages"] = [
         {"name": "faces",
-         "label": "Copy khuon mat tu Immich",
+         "label": "Copy faces from Immich",
          "done": p["face_todo"] + p["face_done"] + p["face_err"],
          "total": p["n_asset"]},
         {"name": "landmarks",

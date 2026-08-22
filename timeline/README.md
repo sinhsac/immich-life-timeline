@@ -1,263 +1,290 @@
-# fp-timeline — dựng video hành trình một người từ thư viện Immich
+# fp-timeline — build a life-journey video of one person from an Immich library
 
-Service web chạy thường trú trên k3s.
+A long-running web service on k3s.
 
-## Yêu cầu chỉ gồm: ai, và khi nào
+## The request is only ever: who, and when
 
 ```
-"dựng video của ông A"
-"dựng video của ông A với bà B"
-"dựng video của ông A từ 1/1/2000 đến 12/12/2020"
+"make a video of Mr. A"
+"make a video of Mr. A with Ms. B"
+"make a video of Mr. A from 1/1/2000 to 12/12/2020"
 ```
 
-Đó là toàn bộ những gì UI hỏi. Không hỏi độ dài, không hỏi số ảnh, không có
-thanh trượt nào — **độ dài là kết quả, không phải yêu cầu**. Một request duy
-nhất (`POST /api/videos`) tạo dự án, tự suy ngưỡng lọc, chia chương, tự suy thời
-lượng và bắt đầu dựng.
+That is everything the UI asks for. No duration, no photo count, no sliders —
+**duration is an outcome, not an input**. A single request (`POST /api/videos`)
+creates the project, infers the filter thresholds, splits the timeline into
+chapters, infers the duration, and starts rendering.
 
-Xem xong video thì có hai nút **Ngắn hơn / Dài hơn** để phản ứng với cái đã thấy,
-thay vì phải đoán một con số trước khi thấy gì.
+Once you have watched the result, two buttons — **Shorter / Longer** — let you
+react to what you actually saw instead of guessing a number before seeing
+anything.
 
-Bốn bước tinh chỉnh từng khâu vẫn còn nguyên nhưng **nằm sau công tắc "Chuyên
-gia"** ở góc trên. Tắt công tắc thì chúng không tồn tại trên giao diện — làm bằng
-một lớp CSS (`.adv` + `body.expert`) chứ không phải hai UI riêng, nên không có
-chuyện hai bên lệch nhau.
+The four fine-tuning steps are all still there, but they live **behind the
+"Expert" toggle** in the top corner. With the toggle off they simply do not exist
+in the interface — done with a single CSS class (`.adv` + `body.expert`) rather
+than two separate UIs, so the two can never drift apart.
 
-## Video kể chuyện, không phải băng ảnh
+## A video that tells a story, not a photo reel
 
-Bản đầu tiên rải ảnh đều tuyệt đối — một ảnh mỗi 30 ngày — rồi cho mỗi ảnh đúng
-1/6 giây. Kết quả là một băng ảnh chạy từ đầu đến cuối, mọi frame quan trọng như
-nhau, mặt đổi liên tục. Xem được mười giây là mệt, vì không có chỗ nào để mắt
-nghỉ và không có gì phân biệt một buổi chiều bình thường với ngày tốt nghiệp.
+The first version spaced photos out perfectly evenly — one photo every 30 days —
+and gave each one exactly 1/6 second. The result was a reel running end to end
+where every frame mattered equally and the face changed constantly. Ten seconds
+in you are tired, because there is nowhere for the eye to rest and nothing
+distinguishing an ordinary afternoon from a graduation day.
 
-Chế độ `story` (mặc định) dựng khác:
+`story` mode (the default) builds it differently:
 
-| | Cách cũ (`even` / `flip`) | Kể chuyện (`story`) |
+| | Old way (`even` / `flip`) | Storytelling (`story`) |
 |---|---|---|
-| Số ảnh | bạn đặt `bucket_days`, ra bao nhiêu thì chịu | **suy ra từ `target_seconds`** |
-| Thời lượng | = số ảnh / fps, không kiểm soát | = ngân sách bạn đặt |
-| Cấu trúc | phẳng | chia **chương** theo thời gian |
-| Nhịp | mọi ảnh 1/6 giây | ảnh **điểm nhấn** 1,7s, ảnh phụ 1,0s |
-| Chuyển cảnh | cắt cứng (hoặc blend cả video) | chồng mờ giữa từng ảnh |
-| Khung | bất động | zoom rất chậm **quanh điểm neo mắt** |
-| Thời gian | nhãn năm chạy suốt video | **thẻ nhãn chương** hiện ra rồi tan đi |
-| Video trong thư viện | bỏ hẳn | **cắt đoạn đẹp nhất** ghép vào |
+| Photo count | you set `bucket_days` and live with whatever comes out | **derived from `target_seconds`** |
+| Duration | = photo count / fps, uncontrolled | = the budget you set |
+| Structure | flat | split into **chapters** by time |
+| Pacing | every photo 1/6 second | **hero** shots 1.7s, supporting shots 1.0s |
+| Transitions | hard cuts (or blending the entire video) | cross-dissolve between every shot |
+| Framing | static | very slow zoom **around the eye anchor** |
+| Time | a year label runs the whole video | **chapter label cards** fade in, then fade away |
+| Videos in the library | dropped entirely | **best segment cut out** and spliced in |
 
-Bốn điểm đáng nói:
+Four things worth calling out:
 
-**Số ảnh suy ra từ thời lượng, không phải ngược lại.** Bạn nói "60 giây", service
-tính ra cần bao nhiêu ảnh rồi chia cho các chương. Thư viện 500 ảnh hay 50 nghìn
-ảnh thì video vẫn 60 giây — chỉ khác độ dày của từng chương.
+**Photo count follows from duration, not the other way around.** You say "60
+seconds", the service works out how many photos that needs and divides them
+across the chapters. A 500-photo library and a 50,000-photo library both give you
+a 60-second video — only the thickness of each chapter differs.
 
-**Mỗi chương được ít nhất một ảnh.** Phủ kín thời gian đáng giá hơn độ dày: mất
-một năm khỏi video là mất một đoạn câu chuyện. Phần ngân sách còn lại chia theo
-`sqrt(số ảnh đạt) / số ảnh đã có` — căn bậc hai để một chuyến du lịch 300 ảnh
-không ăn hết, chia cho số đã có để không dồn cục.
+**Every chapter gets at least one photo.** Covering the whole span is worth more
+than density: losing a year from the video means losing a stretch of the story.
+What is left of the budget is split by `sqrt(eligible photos) / photos already
+assigned` — the square root so a 300-photo holiday does not eat everything, and
+the divisor so nothing clumps up.
 
-**Mỗi chương có một ảnh điểm nhấn** (điểm cao nhất) được giữ lâu gần gấp đôi. Đây
-là thứ tạo ra nhịp. Không có nó thì chia chương xong vẫn là băng ảnh.
+**Every chapter has one hero shot** (its highest-scoring photo) held for nearly
+twice as long. This is what creates the rhythm. Without it, splitting into
+chapters still leaves you with a photo reel.
 
-**Zoom không phá điểm neo.** Phép biến đổi luôn đưa điểm giữa hai mắt về đúng một
-chỗ, nên zoom quanh chính điểm đó: khuôn mặt không hề xê dịch, chỉ bối cảnh rộng
-ra hẹp vào. Neo vẫn là neo, nhưng khung hết bất động.
+**Zoom does not break the anchor.** The transform always puts the midpoint
+between the eyes in exactly the same spot, so the zoom happens around that very
+point: the face does not shift at all, only the surrounding context widens and
+narrows. The anchor stays an anchor, but the framing stops being static.
 
-Chế độ cũ vẫn còn nguyên (`mode: even` ở bước 3, `mode: flip` ở bước 4) cho ai
-muốn kiểu flipbook thật.
+The old modes are untouched (`mode: even` in step 3, `mode: flip` in step 4) for
+anyone who genuinely wants the flipbook look.
 
-## Đoạn video thật, không chỉ ảnh
+## Real video segments, not just photos
 
-Job indexer (stage `clips`) quét từng frame video trong thư viện, tìm đúng người
-bạn chọn, rồi cắt ra đoạn đẹp nhất và lưu vào `fp_vclip`. Service này đọc lại kết
-quả đó và ghép đoạn vào giữa các bức ảnh.
+The indexer job (stage `clips`) scans every frame of every video in the library,
+finds the person you selected, cuts out the best segment, and stores it in
+`fp_vclip`. This service reads those results back and splices the clips in
+between the photos.
 
-**Đoạn video đi qua đúng bộ lọc với ảnh.** Query trả về các cột cùng tên (`sharp`,
-`bright`, `frontality`, `eye_ratio`) nên `_reject()` dùng chung một hàm — không có
-hai nhánh lọc song song rồi lệch nhau. Khác biệt duy nhất là `fidx` **âm**
-(`-1 - cidx`) để phân biệt, cộng thêm hai ngưỡng riêng:
+**Clips go through exactly the same filters as photos.** The query returns
+identically named columns (`sharp`, `bright`, `frontality`, `eye_ratio`) so
+`_reject()` is one shared function — no two parallel filtering branches that
+slowly drift apart. The only difference is a **negative** `fidx` (`-1 - cidx`) to
+tell them apart, plus two thresholds of their own:
 
-| Ngưỡng | Mặc định | Ý nghĩa |
+| Threshold | Default | Meaning |
 |---|---|---|
-| `use_clips` | true | Tắt thì video ra chỉ có ảnh |
-| `max_clip_motion` | 2.6 | Độ rung tối đa, tính bằng "chiều rộng mặt mỗi giây" |
-| `min_clip_seconds` | 0.8 | Đoạn ngắn hơn thì bỏ |
+| `use_clips` | true | Off means the video is photos only |
+| `max_clip_motion` | 2.6 | Maximum shake, measured in "face widths per second" |
+| `min_clip_seconds` | 0.8 | Shorter segments are dropped |
 
-**Mỗi chương có đoạn thì được giành một suất.** Không thể để việc này cho điểm số:
-một chương 25 ảnh thì ảnh cao nhất gần như luôn thắng một đoạn video trung bình, và
-thế là cả tính năng video không bao giờ xuất hiện. Luật là: nếu chương có đoạn mà
-chưa được chọn, thay bức ảnh điểm thấp nhất bằng đoạn tốt nhất — trừ khi đoạn kém
-hơn 25% so với bức bị thay (`CLIP_TRADE = 0.75`). Chịu mất một phần điểm chất lượng
-để đổi lấy một đoạn động, nhưng không đổi một bức ảnh xuất sắc lấy một đoạn tầm
-thường.
+**A chapter that has a clip gets a guaranteed slot.** This cannot be left to
+scoring: in a 25-photo chapter the top photo almost always beats an average video
+segment, and the whole video feature would then never show up at all. The rule
+is: if a chapter has a clip that has not been picked, replace its lowest-scoring
+photo with the best clip — unless the clip is more than 25% worse than the photo
+it would replace (`CLIP_TRADE = 0.75`). Give up some quality score to gain motion,
+but never trade an outstanding photo for a mediocre clip.
 
-**Đoạn mang độ dài của chính nó.** Không ép một đoạn 3,2 giây thành 1 giây, và
-không zoom Ken Burns lên nó (nó đã tự chuyển động). Vì thế sau khi chọn xong,
-`story.trim_to()` tính lại tổng thật và tỉa bớt ảnh phụ điểm thấp nếu vượt trần —
-tỉa ở bước chọn ảnh, không để bước dựng tự ý bỏ, để những gì bạn thấy ở bước 3
-đúng là những gì vào video.
+**A clip carries its own length.** No squeezing a 3.2-second clip into one
+second, and no Ken Burns zoom on top of it (it already moves on its own). So once
+selection is done, `story.trim_to()` recomputes the real total and trims
+low-scoring supporting photos if it overshoots the ceiling — trimming at the
+selection step rather than letting the render step quietly drop things, so what
+you see in step 3 is exactly what ends up in the video.
 
-Hai ngoại lệ về nhịp:
+Two exceptions to the pacing:
 
-- **Đoạn mở đầu không bị kéo dài cho thẻ tiêu đề.** Nếu kéo dài thì người xem nhìn
-  một frame đứng hình 2,4 giây rồi clip mới chạy. Tiêu đề hiện *lên trên* đoạn đang
-  chạy.
-- **Đoạn kết thúc thì ngược lại**: giữ thêm rồi mờ dần về đen. Với đoạn video đó là
-  một frame đứng hình ở cuối — cách đóng màn thông thường, và không ăn mất giây nào
-  của nội dung.
+- **An opening clip is not extended for the title card.** Extending it would show
+  the viewer a frozen frame for 2.4 seconds before the clip starts moving.
+  Instead the title appears *over* the running clip.
+- **A closing clip is the opposite**: hold longer, then fade to black. For a video
+  segment that means a frozen frame at the end — the conventional way to close
+  out, and it costs no seconds of actual content.
 
-### Neo khuôn mặt đang di chuyển
+### Anchoring a moving face
 
-Đây là chỗ khác bản chất so với ảnh tĩnh: **khuôn mặt di chuyển suốt đoạn**. Neo
-vào một vị trí lấy từ một mốc thì đến cuối đoạn mặt đã trôi ra khỏi chỗ.
+This is where clips differ fundamentally from stills: **the face moves throughout
+the segment**. Anchor to a position taken from a single sample point and by the
+end of the clip the face has drifted out of place.
 
-Indexer lưu `track` — `kps` tại từng mốc lấy mẫu — và `_ClipSrc` nội suy tuyến tính
-giữa hai mốc gần nhất cho mỗi frame đầu ra. Kết quả: khuôn mặt vẫn đứng một chỗ
-xuyên suốt cả đoạn, giống như với ảnh tĩnh. **Người trong khung cử động, còn khung
-thì không.**
+The indexer stores a `track` — `kps` at each sampled point — and `_ClipSrc`
+linearly interpolates between the two nearest samples for every output frame. The
+result: the face holds one position for the whole segment, just like with stills.
+**The person inside the frame moves, the framing does not.**
 
-Đọc tuần tự, không seek từng frame: seek lại từ keyframe cho mỗi frame sẽ chậm gấp
-nhiều lần. Chỉ seek **một** lần đến đầu đoạn (lùi lại 40ms vì với codec có B-frame
-`POS_MSEC` lãng ở keyframe gần nhất trước đó).
+Reading is sequential, not a seek per frame: seeking back to a keyframe for every
+frame would be many times slower. There is exactly **one** seek, to the start of
+the segment (40ms early, because with B-frame codecs `POS_MSEC` lands on the
+nearest preceding keyframe).
 
-**Cần `MEDIA_ROOT`.** Chế độ `IMMICH_URL` không đọc được video; `preflight()` sẽ bỏ
-mọi đoạn video trước khi tính thời lượng, nên video vẫn ra, chỉ có ảnh.
+**`MEDIA_ROOT` is required.** `IMMICH_URL` mode cannot read video files;
+`preflight()` drops every clip before duration is computed, so you still get a
+video, just photos only.
 
-Chế độ `flip` bỏ qua đoạn video hoàn toàn — nó là chuỗi ảnh tĩnh, không có chỗ.
+`flip` mode ignores clips entirely — it is a sequence of stills, there is no place
+for them.
 
-### Tiếng: J-cut và L-cut
+### Audio: J-cuts and L-cuts
 
-Ảnh tĩnh không có tiếng, nên giữa các đoạn là im lặng. Nếu chỉ dán đúng tiếng của
-đoạn vào đúng khoảng hình của nó thì mỗi đoạn thành một khối tiếng bị đóng mở cửa
-— đúng nghĩa "chèn tiếng".
+Stills have no audio, so the gaps between clips are silent. Pasting each clip's
+audio over exactly its own picture range would turn every clip into a block of
+sound with a door opening and closing around it — literally "inserted audio".
 
-Nên tiếng **vào trước hình** (`audio_lead`, mặc định 0,5s) và **còn lại sau khi
-hình đã cắt** (`audio_tail`, 0,8s). Trong dựng phim đó là J-cut và L-cut: tai nghe
-thấy không gian mới trước khi mắt thấy nó, và không gian đó không tắt đột ngột cùng
-lúc với hình.
+So audio **comes in before the picture** (`audio_lead`, default 0.5s) and **stays
+on after the picture has cut away** (`audio_tail`, 0.8s). In editing terms these
+are the J-cut and the L-cut: the ear hears the new space before the eye sees it,
+and that space does not stop dead at the same instant as the picture.
 
-| Tham số | Mặc định | Ghi chú |
+| Parameter | Default | Notes |
 |---|---|---|
-| `audio` | true | Tắt thì video im lặng hoàn toàn |
-| `audio_lead` | 0.5 | Tiếng vào trước hình bao nhiêu giây |
-| `audio_tail` | 0.8 | Tiếng còn lại sau khi hình đã cắt |
-| `audio_fade_in` / `audio_fade_out` | 0.35 / 0.6 | Không bao giờ dài quá nửa đoạn |
-| `audio_normalize` | true | `dynaudnorm` cân mức giữa các đoạn |
+| `audio` | true | Off means a completely silent video |
+| `audio_lead` | 0.5 | How many seconds audio leads the picture |
+| `audio_tail` | 0.8 | How long audio stays on after the picture has cut |
+| `audio_fade_in` / `audio_fade_out` | 0.35 / 0.6 | Never longer than half the segment |
+| `audio_normalize` | true | `dynaudnorm` evens out levels across segments |
 | `audio_gain` | 0 | dB |
 
-Ba chỗ bị cắt, và bỏ chỗ nào cũng làm tiếng lệch với hình **suốt cả đoạn** mà
-ffmpeg không báo lỗi gì:
+Three places get clamped, and skipping any one of them puts audio out of sync
+with the picture **for the entire segment** without ffmpeg reporting anything:
 
-- Đoạn nằm ở đầu video không thể cho tiếng vào trước giây 0 → `lead` bị cắt theo
-  vị trí của đoạn, nếu không thì `adelay` âm.
-- Đoạn bắt đầu ở đầu *file* không thể đọc tiếng trước giây 0 của file → `lead` bị
-  cắt theo `t_start`, nếu không thì `atrim` âm.
-- `tail` không được đọc quá cuối file nguồn (`src_dur_ms`).
+- A clip at the very start of the video cannot start its audio before second 0 →
+  `lead` is clamped to the clip's position, otherwise `adelay` goes negative.
+- A clip starting at the beginning of its *source file* cannot read audio from
+  before second 0 of that file → `lead` is clamped to `t_start`, otherwise `atrim`
+  goes negative.
+- `tail` must not read past the end of the source file (`src_dur_ms`).
 
-Việc cắt do `-ss` / `-t` **ở input** làm, không phải `atrim` trong filter — cắt ở
-input thì ffmpeg chỉ decode đúng phần cần, và không có nguy cơ cắt hai lần.
+The trimming is done by `-ss` / `-t` **on the input**, not by `atrim` in the
+filter graph — trimming at the input means ffmpeg only decodes the part it needs,
+and there is no risk of trimming twice.
 
-Chuỗi filter: mỗi input qua `aformat` (các clip khác sample rate và số kênh, mà
-`amix` đòi giống nhau), rồi `afade` hai đầu + `adelay` đặt vào đúng giây, rồi
-`amix` với
-**`normalize=0`** — `amix` mặc định chia âm lượng cho số input nên 8 đoạn thì mỗi
-đoạn chỉ còn 1/8, nghe như thì thầm. Các đoạn gần như không chồng nhau nên cộng
-thẳng lại là đúng, và `alimiter` chặn đỉnh phía sau. `apad=whole_dur` phủ hết độ
-dài video vì đoạn cuối thường kết thúc trước khi hình hết.
+The filter chain: each input goes through `aformat` (clips differ in sample rate
+and channel count, and `amix` demands they match), then `afade` at both ends plus
+`adelay` to place it at the right second, then `amix` with
+**`normalize=0`** — `amix` divides volume by the number of inputs by default, so
+with 8 clips each one drops to 1/8 and everything sounds like whispering. The
+segments barely overlap, so summing them straight is correct, and `alimiter`
+catches the peaks downstream. `apad=whole_dur` covers the full video length
+because the last clip usually ends before the picture does.
 
-Ghép tiếng chạy **sau** khi đã encode xong hình, và `-c:v copy` nên không encode
-lại. Bước này thất bại vì bất kỳ lý do gì thì vẫn còn nguyên video im lặng — thay
-vì mất cả video. Clip không có track tiếng bị loại khỏi kế hoạch bằng `ffprobe`:
-một input không có audio sẽ làm cả `filter_complex` thất bại, kéo theo mất tiếng
-của tất cả đoạn khác.
+The audio mux runs **after** the picture has finished encoding, with `-c:v copy`
+so nothing is re-encoded. If this step fails for any reason you still have the
+silent video intact — instead of losing the video altogether. Clips with no audio
+track are removed from the plan using `ffprobe`: one input without audio makes the
+whole `filter_complex` fail, taking the audio of every other segment with it.
 
-Chế độ chuyên gia mở lại bốn bước:
+Expert mode brings back the four steps:
 
-1. **Chọn cụm** — chọn nhiều cluster của cùng một người, có gợi ý lan rộng
-2. **Ảnh đã chọn** — xem phân bố theo năm và theo chương
-3. **Ngưỡng lọc** — kéo ngưỡng, mỗi ảnh bị loại đều có lý do cụ thể
-4. **Thông số dựng** — xem trước khung và cấu trúc chuyện rồi mới dựng
+1. **Select person** — pick several clusters of the same person, with suggestions to widen the net
+2. **Selected photos** — see the distribution by year and by chapter
+3. **Filter thresholds** — drag the thresholds; every rejected photo has a concrete reason
+4. **Render settings** — preview the framing and the story structure before rendering
 
-Đường mặc định tự bật chế độ chuyên gia và nhảy vào bước 3 khi **không chọn đủ 2
-ảnh** — ffmpeg cần tối thiểu 2 frame, nên thay vì render rồi báo lỗi khó hiểu, UI
-đưa bạn tới đúng chỗ nới ngưỡng kèm lý do.
+The default path turns expert mode on by itself and jumps straight to step 3 when
+**fewer than 2 photos** are selected — ffmpeg needs at least 2 frames, so instead
+of rendering and then reporting a cryptic error, the UI takes you to the exact
+place where you can loosen thresholds, with the reason attached.
 
-## Video của nhiều người
+## Videos of several people
 
-Chọn nhiều cụm mặc định nghĩa là **cùng một người** — Immich hay tách một người
-thành nhiều cluster theo độ tuổi. Muốn video của hai người thì chọn cụm của người
-thứ nhất, bấm **+ Thêm người nữa**, rồi chọn cụm của người thứ hai. Không suy ra
-được từ một mớ cụm lẫn lộn, nên phải chốt từng người một.
+Selecting several clusters means **the same person** by default — Immich often
+splits one person into several clusters by age. For a video of two people, pick
+the first person's clusters, hit **+ Add another person**, then pick the second
+person's clusters. There is no way to infer the grouping from one mixed bag of
+clusters, so each person has to be committed one at a time.
 
-Tích **chỉ ảnh có mặt đủ tất cả** thì chỉ lấy ảnh hai người chụp chung; bỏ tích
-thì lấy ảnh của bất kỳ ai trong số họ, ghép thành một dòng thời gian chung.
+Tick **only photos containing all of them** to keep just the photos where both
+appear; untick it to take photos of any of them, merged into one shared timeline.
 
-Một tấm ảnh chỉ ra **một** frame dù trong đó có nhiều mặt thuộc những người đã
-chọn — nếu không thì cùng một bức xuất hiện hai lần trong video.
+A single photo produces **one** frame even if it contains several faces belonging
+to selected people — otherwise the same photo would show up twice in the video.
 
-### Neo hai khuôn mặt
+### Anchoring two faces
 
-Ảnh có cả hai người thì điểm neo không còn là một khuôn mặt. Nhưng **không** thể
-lấy hai tâm mắt làm "hai mắt" rồi để `level` xoay cho chúng nằm ngang: bố cao con
-thấp là lệch 30°, hỏng ảnh.
+In a photo with both people the anchor is no longer a single face. But you
+**cannot** treat the two eye centres as "a pair of eyes" and let `level` rotate
+them flat: a tall parent and a short child are 30° apart, which wrecks the photo.
 
-`media.pair_kps()` trả về hai **điểm ảo nằm ngang**, cách nhau đúng khoảng cách
-thật giữa hai người, đặt quanh trung điểm của họ. Kết quả: góc xoay 0, trung điểm
-hai người luôn ở một chỗ, và khoảng cách giữa họ luôn bằng một tỉ lệ khung
-(`pair_frac`, mặc định 0,30) — ai xa nhau thì khung tự rộng ra để chứa hết. Ảnh
-chỉ có một người trong nhóm vẫn neo bình thường theo một mặt, không bị loại.
+`media.pair_kps()` returns two **virtual points on a horizontal line**, separated
+by the real distance between the two people, placed around their midpoint. The
+result: rotation angle 0, the midpoint of the pair always in the same spot, and
+the distance between them always a fixed fraction of the frame width
+(`pair_frac`, default 0.30) — the further apart they stand, the wider the framing
+opens to fit them. Photos containing only one person from the group still anchor
+normally on that one face instead of being rejected.
 
-Tiến độ index nằm ở **trang Thống kê** riêng trên thanh nav. Trước đây khối đó ở
-header nên chiếm chỗ trên cả bốn bước dù đã gập lại. Nhãn nav hiện phần trăm tổng
-để biết khi nào cần mở, kèm dấu tròn xanh khi đang có stage chạy.
+Indexing progress lives on its own **Statistics page** on the nav bar. It used to
+sit in the header, where it took up room across all four steps even when
+collapsed. The nav label shows the overall percentage so you know when it is worth
+opening, plus a green dot while a stage is running.
 
-Chạy sau khi `../indexer` đã xong. Service **không load model ML nào** — align
-dùng `kps` đã lưu trong `fp_face`, nên RAM chỉ ~300MB.
+Run this after `../indexer` has finished. The service **loads no ML models at
+all** — alignment uses the `kps` already stored in `fp_face`, so RAM stays around
+300MB.
 
-## Vì sao phải chọn nhiều cụm
+## Why you have to select several clusters
 
-Immich tách **một người thành nhiều cluster** khi khoảng thời gian dài — bé,
-thiếu niên, trưởng thành thường thành ba cluster khác nhau. Chỉ chọn một cluster
-thì video mất hẳn những giai đoạn còn lại.
+Immich splits **one person into several clusters** when the time span is long —
+child, teenager, adult usually end up as three different clusters. Pick only one
+cluster and the video loses those other stretches entirely.
 
-`fp_project.person_ids` giữ danh sách cluster, `select.fetch()` lọc bằng
-`person_id = ANY(...)`. `GET /api/people/{id}/similar` gợi ý cụm cùng người:
-lấy trung bình embedding ArcFace của 16 face điểm cao nhất mỗi cluster (đủ để
-tâm ổn định mà không phải kéo 89k vector), chuẩn hoá rồi so cosine. Truyền
-`seeds=` các cluster đã chọn thì nó so với tâm gộp của cả nhóm — chọn thêm rồi
-gọi lại là lan rộng dần.
+`fp_project.person_ids` holds the list of clusters and `select.fetch()` filters
+with `person_id = ANY(...)`. `GET /api/people/{id}/similar` suggests clusters of
+the same person: it averages the ArcFace embeddings of the 16 highest-scoring
+faces per cluster (enough for a stable centroid without pulling 89k vectors),
+normalises, then compares by cosine. Pass `seeds=` with the clusters already
+selected and it compares against the combined centroid of the whole group — select
+more, call again, and the net widens step by step.
 
-**Giới hạn thật, cần biết trước khi tin kết quả:** cosine một mình không tách
-được người thân. Trên thư viện thật, cụm cùng người đạt ~0.54 còn một người
-khác đã đặt tên đạt 0.435 — biên rất hẹp. Vì vậy cụm nào đã có **tên khác** với
-nhóm đang chọn sẽ bị đánh dấu `name_conflict` và đẩy xuống cuối; đây là tín hiệu
-đáng tin hơn con số cosine. Vẫn phải nhìn ảnh rồi mới chọn.
+**A real limitation, worth knowing before you trust the results:** cosine alone
+cannot separate family members. On a real library, clusters of the same person
+scored around 0.54 while a different, already-named person scored 0.435 — a very
+narrow margin. So any cluster carrying a **different name** from the group being
+selected is flagged `name_conflict` and pushed to the bottom; that is a more
+trustworthy signal than the cosine number. You still have to look at the photos
+before selecting.
 
-Centroid được cache 10 phút vì tính một lần mất vài chục giây.
+Centroids are cached for 10 minutes because computing them takes tens of seconds.
 
-## Vì sao phải neo khuôn mặt
+## Why the face has to be anchored
 
-Nếu chỉ ghép ảnh theo thứ tự thời gian thì mặt nhảy loạn, không xem được. Neo
-đưa hai mắt về đúng một vị trí và đúng một độ lớn trong mọi frame. Đây là điểm
-quyết định video có ra được hay không.
+Splice photos together in date order and the face jumps all over the place,
+unwatchable. Anchoring puts the eyes in the same position at the same scale in
+every frame. This is what decides whether the video works at all.
 
-Nhưng neo **không có nghĩa là crop sát mặt**. Khuôn mặt chỉ là điểm neo; khung
-hình vẫn nên giữ càng nhiều bối cảnh càng tốt. Tham số quyết định là
-`face_frac` — khoảng cách hai mắt tính theo chiều ngang khung ra:
+But anchoring **does not mean cropping tight to the face**. The face is only the
+anchor point; the framing should still keep as much context as possible. The
+parameter that decides this is `face_frac` — the eye-to-eye distance as a fraction
+of the frame width:
 
-| `face_frac` | Kết quả |
+| `face_frac` | Result |
 |---|---|
-| 0.50–0.60 | Chân dung sát mặt, mất hết bối cảnh |
-| **0.10–0.15** | Thấy cả người và bối cảnh — **mặc định** |
-| 0.06–0.08 | Toàn cảnh, người nhỏ |
+| 0.50–0.60 | Tight portrait, all context gone |
+| **0.10–0.15** | Whole body plus surroundings visible — **default** |
+| 0.06–0.08 | Wide shot, person small |
 
-Ảnh có người khác vẫn neo theo người bạn chọn, vì `kps` lấy từ đúng `fidx` của
-người đó trong `fp_face`.
+Photos containing other people still anchor on the person you selected, because
+`kps` comes from that person's specific `fidx` in `fp_face`.
 
-Ảnh không đủ lớn để phủ kín khung thì hàm tự phóng to thêm, và khi buộc phải
-chọn giữa "đúng điểm neo" và "không có viền trống" thì nó ưu tiên phủ kín —
-khuôn mặt lệch khỏi `eye_y` một chút. Đổi sang `fill=blur` nếu muốn giữ trọn
-khung ảnh và chấp nhận nền mờ ở phần thiếu.
+When a photo is not large enough to cover the frame the function scales it up
+further, and when it has to choose between "exact anchor position" and "no empty
+borders" it prioritises covering the frame — the face ends up slightly off
+`eye_y`. Switch to `fill=blur` if you would rather keep the whole photo and accept
+a blurred background where it falls short.
 
-## Kiến trúc
+## Architecture
 
 ```
 Immich (docker compose)          k3s (namespace media)
@@ -266,31 +293,32 @@ Immich (docker compose)          k3s (namespace media)
 │ immich-machine-  │            │  → fp_asset/face/body │
 │   learning       │            ├───────────────────────┤
 │ postgres  ───────┼────────────┤ Svc  fp-timeline      │  Deployment
-└──────────────────┘  cùng db   │  → fp_project/render  │
+└──────────────────┘  same db   │  → fp_project/render  │
       │                         └───────────────────────┘
-      └── UPLOAD_LOCATION ──── mount read-only vào cả hai
+      └── UPLOAD_LOCATION ──── mounted read-only into both
 ```
 
-Bảng đọc: `fp_asset`, `fp_face`, `fp_body` (do indexer tạo).
-Bảng ghi: `fp_project`, `fp_project_frame`, `fp_render`.
-Bảng Immich: chỉ đọc, không bao giờ bị ghi.
+Tables read: `fp_asset`, `fp_face`, `fp_body` (created by the indexer).
+Tables written: `fp_project`, `fp_project_frame`, `fp_render`.
+Immich tables: read only, never written.
 
-## Cấu hình
+## Configuration
 
-Env var, xem `.env.example`. Bắt buộc: `PG_PASSWORD`, `MEDIA_ROOT`.
-Rất nên đặt: `API_TOKEN`.
+Env vars, see `.env.example`. Required: `PG_PASSWORD`, `MEDIA_ROOT`.
+Strongly recommended: `API_TOKEN`.
 
-## Chạy local
+## Running locally
 
 ```bash
 pip install -r requirements.txt
-python app.py --check          # kiểm tra pg / ảnh / ffmpeg rồi thoát
+python app.py --check          # check pg / photos / ffmpeg, then exit
 python app.py                  # http://localhost:8080
 ```
 
-Cần `ffmpeg` trong PATH. Không có thì ba bước đầu vẫn chạy, chỉ bước render lỗi.
+Needs `ffmpeg` on the PATH. Without it the first three steps still work, only the
+render step fails.
 
-## Deploy k3s
+## Deploying to k3s
 
 ```bash
 kubectl -n media create secret generic fp-timeline \
@@ -300,228 +328,237 @@ docker build -f deploy/Dockerfile -t fp-timeline:1.0.0 .
 kubectl apply -f deploy/k3s.yaml
 ```
 
-Sửa `hostPath` trỏ vào thư mục upload của Immich. `replicas: 1` +
-`strategy: Recreate` là cố ý: render chạy ở thread nền và ghi vào PVC, hai pod
-sẽ đạp nhau.
+Point `hostPath` at Immich's upload directory. `replicas: 1` +
+`strategy: Recreate` is deliberate: rendering runs on a background thread and
+writes to the PVC, so two pods would trample each other.
 
-## Bảo mật
+## Security
 
-Service này xem được **toàn bộ ảnh gia đình**. Mặc định không có xác thực —
-service sẽ in cảnh báo và UI hiện banner vàng nếu `API_TOKEN` trống.
+This service can see **every family photo you have**. There is no authentication
+by default — the service prints a warning and the UI shows a yellow banner when
+`API_TOKEN` is empty.
 
-Đặt `API_TOKEN` trước khi mở cổng ra ngoài mạng nội bộ. Truy cập bằng
-`?token=...` hoặc header `Authorization: Bearer ...`.
-Ingress trong `deploy/k3s.yaml` chưa bật TLS — thêm cert-manager nếu ra internet.
+Set `API_TOKEN` before exposing the port beyond your local network. Access it with
+`?token=...` or the `Authorization: Bearer ...` header.
+The Ingress in `deploy/k3s.yaml` has TLS off — add cert-manager if it goes out to
+the internet.
 
-Token nhận từ ba nguồn: header, `?token=`, và **cookie**. Cookie không phải cho
-tiện: trình duyệt tải `style.css` / `app.js` bằng thẻ `<link>` và `<script>` nên
-không gửi được header, mà `index.html` cũng không tự thêm `?token=` vào đó. Vào
-bằng `?token=` một lần, service ghi cookie (HttpOnly, 30 ngày), các request sau
-tự đi qua. Bỏ cookie đi thì bật token lên là trang hiện ra dạng HTML trần.
+The token is accepted from three sources: the header, `?token=`, and a **cookie**.
+The cookie is not for convenience: the browser loads `style.css` / `app.js` via
+`<link>` and `<script>` tags, which cannot send a header, and `index.html` does
+not append `?token=` to them either. Come in once with `?token=`, the service sets
+a cookie (HttpOnly, 30 days), and every request after that goes through on its
+own. Remove the cookie and turning the token on gets you the page as bare HTML.
 
-## Các ngưỡng lọc
+## Filter thresholds
 
-Nhóm pose đầu (từ `1k3d68`):
+Head pose group (from `1k3d68`):
 
-| Ngưỡng | Mặc định | Ý nghĩa |
+| Threshold | Default | Meaning |
 |---|---|---|
-| `max_yaw` | 22° | Quay trái/phải |
-| `max_pitch` | 18° | Ngửa/cúi |
-| `max_roll` | 20° | Nghiêng đầu |
-| `min_frontality` | 0.45 | Gộp pose + đối xứng, 0..1 |
-| `min_ear` | 0.15 | Loại ảnh nhắm mắt |
+| `max_yaw` | 22° | Turned left/right |
+| `max_pitch` | 18° | Tilted up/down |
+| `max_roll` | 20° | Head tilted sideways |
+| `min_frontality` | 0.45 | Combines head pose + symmetry, 0..1 |
+| `min_ear` | 0.15 | Rejects photos with closed eyes |
 
-Nhóm chất lượng ảnh:
+Image quality group:
 
-| Ngưỡng | Mặc định | Ý nghĩa |
+| Threshold | Default | Meaning |
 |---|---|---|
-| `min_eye_ratio` | 0.030 | Hai mắt cách nhau ≥ 3% cạnh dài — loại mặt quá nhỏ |
-| `min_sharp` | 60 | Laplacian variance trên crop 128px |
-| `bright_min/max` | 45 / 215 | Loại ảnh cháy sáng hoặc quá tối |
+| `min_eye_ratio` | 0.030 | Eyes at least 3% of the long edge apart — rejects faces that are too small |
+| `min_sharp` | 60 | Laplacian variance on a 128px crop |
+| `bright_min/max` | 45 / 215 | Rejects blown-out or too-dark photos |
 
-Nhóm người khác trong ảnh:
+Other people in the photo group:
 
-| Ngưỡng | Mặc định | Ý nghĩa |
+| Threshold | Default | Meaning |
 |---|---|---|
-| `allow_others` | **true** | Chấp nhận ảnh có người khác |
-| `max_faces` | 0 | Giới hạn số mặt, 0 = không giới hạn |
+| `allow_others` | **true** | Accept photos containing other people |
+| `max_faces` | 0 | Face count limit, 0 = no limit |
 
-Nhóm body pose (từ `yolov8n-pose`):
+Body pose group (from `yolov8n-pose`):
 
-| Ngưỡng | Mặc định |
+| Threshold | Default |
 |---|---|
 | `postures` | standing, sitting, unknown |
 | `orientations` | front, side, unknown |
-| `allow_missing_body` | true — không detect được thân vẫn nhận |
-| `use_body` | true — tắt thì bỏ qua hoàn toàn dữ liệu body |
+| `allow_missing_body` | true — accept even when no body was detected |
+| `use_body` | true — off means body data is ignored entirely |
 
-Nhóm kể chuyện — quyết định **lấy ảnh nào và bao nhiêu**:
+Storytelling group — decides **which photos and how many**:
 
-| Ngưỡng | Mặc định | Ý nghĩa |
+| Threshold | Default | Meaning |
 |---|---|---|
-| `mode` | `story` | `story` chia chương \| `even` rải đều như bản cũ |
-| `target_seconds` | **null** | `null` = tự suy từ dữ liệu. Một con số = ép thời lượng |
-| `pace` | `normal` | `slow` 2,4/1,5s · `normal` 1,7/1,0s · `quick` 1,2/0,7s · `snap` 0,8/0,45s (điểm nhấn/ảnh phụ) |
+| `mode` | `story` | `story` splits into chapters \| `even` spaces evenly like the old version |
+| `target_seconds` | **null** | `null` = inferred from the data. A number = forced duration |
+| `pace` | `normal` | `slow` 2.4/1.5s · `normal` 1.7/1.0s · `quick` 1.2/0.7s · `snap` 0.8/0.45s (hero/supporting) |
 | `chapter_by` | `auto` | `years2` \| `year` \| `half` \| `quarter` \| `month` |
-| `max_per_chapter` | 6 | Trần ảnh mỗi chương, chặn một chuyến đi chiếm hết video |
+| `max_per_chapter` | 6 | Photo ceiling per chapter, stops one trip from taking over the video |
 
-### Độ dài tự suy ra sao
+### How the duration is inferred
 
-Mỗi chương tự quyết định độ dày của nó theo số ảnh đạt ngưỡng mà nó có, tăng theo
-`log2`: 1 ảnh → 1, 3 ảnh → 2, 7 → 3, 15 → 4, 31 → 5. Logarit vì độ dày của ký ức
-không tỉ lệ thuận với số ảnh chụp được — một chuyến đi 300 ảnh không đáng gấp 100
-lần một buổi chiều 3 ảnh, nó chỉ đáng gấp vài lần. Cộng lại được bao nhiêu thì
-video dài bấy nhiêu, rồi chặn trên 150 giây bằng cách bớt dần từ chương đang được
-nhiều nhất.
+Each chapter decides its own thickness from how many photos it has that pass the
+thresholds, growing by `log2`: 1 photo → 1, 3 photos → 2, 7 → 3, 15 → 4, 31 → 5.
+Logarithmic because the weight of a memory is not proportional to how many photos
+got taken — a 300-photo trip is not worth 100 times a 3-photo afternoon, it is
+worth a few times as much. Add it all up and that is the video length, then cap it
+at 150 seconds by shaving down the chapters that got the most.
 
-Đo thật trên dữ liệu sinh: 40 ảnh / 4 năm → 15 ảnh, 8 chương quý, **24 giây**.
-3000 ảnh / 14 năm → 83 ảnh, 15 chương năm, **97 giây**. Cùng một thuật toán, không
-ai phải nhập gì.
+Measured on generated data: 40 photos / 4 years → 15 photos, 8 quarterly
+chapters, **24 seconds**. 3000 photos / 14 years → 83 photos, 15 yearly chapters,
+**97 seconds**. Same algorithm, nobody has to type anything.
 
-Đặt `target_seconds` bằng một con số thì chuyển sang đường ngân sách: ảnh được
-phân bổ để vừa con số đó. Gửi lại `null` là quay về tự suy.
+Set `target_seconds` to a number and it switches to the budget path: photos are
+allocated to fit that number. Send `null` again to go back to inference.
 
-### `chapter_by: auto` chọn thế nào
+### How `chapter_by: auto` decides
 
-Ba ràng buộc kéo nhau, xét đồng thời:
+Three constraints pull against each other, all considered together:
 
-1. **Vừa ngân sách** — mỗi chương tối thiểu một ảnh điểm nhấn.
-2. **Càng mịn càng tốt** trong phạm vi còn lại, không phải càng thô: hành trình 13
-   năm ra 13 chương một-năm chứ không gộp thành 7 chương hai-năm — gộp thì có năm
-   bị bỏ qua hẳn.
-3. **Chương phải liền mạch.** Đây là chỗ dễ sai nhất: 40 ảnh rải trong 4 năm mà
-   chia theo tháng thì ra 13 chương trên 48 tháng (35 tháng rỗng) — nhãn đọc ra
-   như ngày tháng rời rạc *"Tháng 3 2019, Tháng 7 2019, Tháng 11 2020"* chứ không
-   ra một tiến trình. Chia theo quý thì 12/16 quý có ảnh, liền mạch hơn nhiều.
-   Ngưỡng là `MIN_DENSITY = 0.4`.
+1. **Fit the budget** — every chapter needs at least one hero shot.
+2. **As fine-grained as possible** within what is left, not as coarse: a 13-year
+   journey becomes 13 one-year chapters rather than being merged into 7 two-year
+   chapters — merging means some years get skipped entirely.
+3. **Chapters must be continuous.** This is the easiest thing to get wrong: 40
+   photos spread over 4 years split by month gives 13 chapters across 48 months
+   (35 empty months) — the labels read like a scatter of disconnected dates,
+   *"March 2019, July 2019, November 2020"*, rather than a progression. Split by
+   quarter and 12 of 16 quarters have photos, far more continuous. The threshold is
+   `MIN_DENSITY = 0.4`.
 
-Số chương bị chặn trong khoảng 3–18; nhiều hơn thì nhãn chương nhảy liên tục thành
-tiếng ồn.
+Chapter count is clamped to 3–18; more than that and the chapter labels flicker
+past as noise.
 
-Nếu ép `target_seconds` lên mà video không dài thêm thì chỉ có hai lý do, và UI
-nói rõ lý do nào: mọi chương đã đạt trần `max_per_chapter`, hoặc đã dùng hết ảnh
-đạt ngưỡng lọc.
+If you push `target_seconds` up and the video does not get any longer there are
+only two possible reasons, and the UI says which one: every chapter has hit its
+`max_per_chapter` ceiling, or the photos passing the filter thresholds have all
+been used.
 
-Nhóm rải đều theo thời gian — chỉ dùng khi `mode: even`:
+Even-spacing-over-time group — only used when `mode: even`:
 
-| Ngưỡng | Mặc định | Ý nghĩa |
+| Threshold | Default | Meaning |
 |---|---|---|
-| `bucket_days` | tự suy | Chia timeline thành ô bằng nhau |
-| `per_bucket` | 1 | Mỗi ô giữ N ảnh điểm cao nhất |
+| `bucket_days` | inferred | Splits the timeline into equal buckets |
+| `per_bucket` | 1 | Keep the N highest-scoring photos per bucket |
 
-Lần đầu mở một người, service tự suy `bucket_days` từ độ dày dữ liệu để ra khoảng
-150–400 frame, để ai chuyển sang chế độ này không phải mở một con số vô nghĩa.
+The first time you open a person, the service infers `bucket_days` from the
+density of the data to land somewhere around 150–400 frames, so anyone switching
+to this mode is not staring at a meaningless number.
 
-## Thông số video
+## Video settings
 
-Khung hình, dùng cho cả hai chế độ:
+Framing, used by both modes:
 
-| Tham số | Mặc định | Ghi chú |
+| Parameter | Default | Notes |
 |---|---|---|
-| `size` | 900 | **Cạnh dài**, tự làm chẵn cho libx264 |
+| `size` | 900 | **Long edge**, rounded to even for libx264 |
 | `aspect` | 4:3 | 1:1, 4:3, 3:2, 16:9, 3:4, 2:3, 9:16 |
-| `face_frac` | 0.12 | Khoảng cách hai mắt / chiều ngang khung. Xem bảng ở trên |
-| `eye_y` | 0.33 | Vị trí mắt theo chiều dọc — kéo lên nếu muốn thấy nhiều thân hơn |
-| `anchor_x` | 0.5 | Vị trí mắt theo chiều ngang |
-| `fill` | crop | `crop` phóng vừa đủ phủ kín, cắt rìa. `blur` giữ trọn ảnh, nền mờ |
-| `level` | true | Xoay cho hai mắt nằm ngang |
-| `pair_frac` | 0.30 | Video hai người: khoảng cách **giữa hai người** / chiều ngang khung |
-| `label` | none | Nhãn thời gian góc dưới: none, year, month, date |
+| `face_frac` | 0.12 | Eye-to-eye distance / frame width. See the table above |
+| `eye_y` | 0.33 | Vertical eye position — raise it to show more of the body |
+| `anchor_x` | 0.5 | Horizontal eye position |
+| `fill` | crop | `crop` scales up just enough to cover, cutting the edges. `blur` keeps the whole photo with a blurred background |
+| `level` | true | Rotate so the eyes are level |
+| `pair_frac` | 0.30 | Two-person video: distance **between the two people** / frame width |
+| `label` | none | Time label in the lower corner: none, year, month, date |
 
-Riêng `mode: story`:
+`mode: story` only:
 
-| Tham số | Mặc định | Ghi chú |
+| Parameter | Default | Notes |
 |---|---|---|
-| `out_fps` | 24 | fps thật của video |
-| `motion` | subtle | Zoom Ken Burns: none 0 · subtle 3,5% · normal 7% · strong 12% |
-| `title` | true | Thẻ mở đầu: tên người + khoảng năm |
-| `title_seconds` | 2.4 | Thẻ mở đầu nằm **trên ảnh đầu tiên**, không phải màn đen riêng |
-| `chapter_card` | true | Hiện nhãn chương khi sang chương mới |
-| `card_seconds` | 1.8 | Nhãn chương hiện bao lâu rồi tan |
-| `birth_year` | — | Có thì nhãn chương hiện thêm "N tuổi" |
-| `arc` | true | Chương đầu và chương cuối chậm hơn 12% |
-| `intro_s` | 0.8 | Mở màn từ đen |
-| `outro_s` | 1.6 | Giữ thêm rồi đóng màn về đen |
-| `xfade` | theo `pace` | Ghi đè độ dài chồng mờ |
+| `out_fps` | 24 | The video's actual fps |
+| `motion` | subtle | Ken Burns zoom: none 0 · subtle 3.5% · normal 7% · strong 12% |
+| `title` | true | Opening card: person's name + year range |
+| `title_seconds` | 2.4 | The opening card sits **on top of the first photo**, not on its own black screen |
+| `chapter_card` | true | Show the chapter label when a new chapter starts |
+| `card_seconds` | 1.8 | How long the chapter label stays before fading |
+| `birth_year` | — | If set, chapter labels also show "age N" |
+| `arc` | true | First and last chapters run 12% slower |
+| `intro_s` | 0.8 | Fade up from black |
+| `outro_s` | 1.6 | Hold longer, then close out to black |
+| `xfade` | follows `pace` | Overrides the cross-dissolve length |
 
-Riêng `mode: flip` (cách cũ):
+`mode: flip` only (the old way):
 
-| Tham số | Mặc định | Ghi chú |
+| Parameter | Default | Notes |
 |---|---|---|
-| `fps` | 6 | Số ảnh mỗi giây |
-| `smooth` | blend | Pha trộn qua filter `framerate` — rẻ hơn `minterpolate` nhiều |
+| `fps` | 6 | Photos per second |
+| `smooth` | blend | Blending via the `framerate` filter — far cheaper than `minterpolate` |
 
-`eye_dx` cũ vẫn nhận được, quy đổi `face_frac = 2 × eye_dx`.
+The old `eye_dx` is still accepted, converted as `face_frac = 2 × eye_dx`.
 
-Chỉ cho phép **một render cùng lúc** (lock trong process) để không đè Immich.
+Only **one render at a time** is allowed (an in-process lock) so it does not
+overwhelm Immich.
 
-### Chồng mờ không làm video dài ra
+### Cross-dissolves do not make the video longer
 
-Mỗi shot chiếm `hold` frame trên dòng thời gian, và shot sau **bắt đầu chồng lên**
-`xfade` frame cuối của shot trước:
+Each shot occupies `hold` frames on the timeline, and the next shot **starts
+overlapping** the last `xfade` frames of the previous one:
 
 ```
-shot i chiếm  [start_i, start_i + hold_i + xfade_i)
+shot i occupies  [start_i, start_i + hold_i + xfade_i)
 start_(i+1) = start_i + hold_i
-tổng frame  = Σ hold_i
+total frames = Σ hold_i
 ```
 
-Nhờ vậy tổng thời lượng suy ra được chính xác đến từng frame trước khi render một
-pixel nào — `POST /api/projects/{id}/storyboard` trả về đúng con số đó, tính bằng
-đúng hàm mà bước dựng dùng.
+That is what makes the total duration derivable to the exact frame before a single
+pixel is rendered — `POST /api/projects/{id}/storyboard` returns precisely that
+number, computed by the same function the render step uses.
 
-### Vì sao sinh frame bằng numpy thay vì filter của ffmpeg
+### Why frames are generated with numpy instead of ffmpeg filters
 
-`xfade` + `zoompan` của ffmpeg làm được việc này, nhưng chuỗi 60 clip sinh ra một
-filtergraph khổng lồ: tốn RAM, khó đọc log khi lỗi, và gần như không suy ra được
-số frame chính xác. Ở đây mỗi frame đầu ra là **một phép `warpAffine`** — dễ kiểm
-soát, đếm được, và vẫn nhanh vì ảnh preview chỉ 1440px. Frame đẩy thẳng vào stdin
-của ffmpeg dạng rawvideo: không ghi jpg ra đĩa, không encode hai lần.
+ffmpeg's `xfade` + `zoompan` can do this, but a chain of 60 clips produces an
+enormous filtergraph: heavy on RAM, hard to read the log when something breaks,
+and next to impossible to derive an exact frame count from. Here every output
+frame is **one `warpAffine`** — easy to control, countable, and still fast because
+the preview images are only 1440px. Frames are pushed straight into ffmpeg's stdin
+as rawvideo: no jpgs written to disk, no double encode.
 
-Shot không zoom (`motion: none`) chỉ warp **một lần** rồi dùng lại cho cả trăm
-frame của nó.
+A shot with no zoom (`motion: none`) is warped **once** and reused for all hundred
+or so of its frames.
 
-### Chữ có dấu
+### Accented text
 
-Nhãn chương ("Tháng 3 2019"), tuổi ("6 tuổi") và tên người cần font thật — font
-HERSHEY của OpenCV chỉ có ASCII. `tl/textdraw.py` dùng Pillow + một font TTF tìm
-theo `FONT_FILE` rồi đến các đường dẫn hệ thống thông dụng; image đã cài
-`fonts-dejavu-core`. Thiếu font thì tự động bỏ dấu và vẫn chạy — `/api/health`
-báo `text.ok = false` và UI hiện banner vàng.
+Chapter labels ("March 2019"), ages ("age 6") and people's names need a real font
+— OpenCV's HERSHEY fonts are ASCII only. `tl/textdraw.py` uses Pillow with a TTF
+font located via `FONT_FILE` and then the usual system paths; the image ships
+`fonts-dejavu-core`. With no font available it strips accents automatically and
+keeps running — `/api/health` reports `text.ok = false` and the UI shows a yellow
+banner.
 
-Chữ được sinh thành **sprite cache theo (chuỗi, cỡ)** rồi dán lại nhiều lần với
-alpha khác nhau, nên hiệu ứng mờ dần chỉ là nhân alpha chứ không vẽ lại chữ hàng
-trăm lần.
+Text is rendered into a **sprite cache keyed by (string, size)** and then pasted
+repeatedly at different alphas, so a fade is just an alpha multiply rather than
+drawing the text hundreds of times over.
 
 ## API
 
-`GET /api/docs` có OpenAPI đầy đủ. Các endpoint chính:
+`GET /api/docs` has the full OpenAPI spec. The main endpoints:
 
 ```
-GET    /api/health                     tình trạng indexer / ffmpeg / auth
-GET    /api/people                     danh sách cụm
-GET    /api/people/{id}/similar        gợi ý cụm cùng người (seeds= để lan rộng)
-GET    /api/progress                   tiến độ job indexer
-POST   /api/videos                     ĐƯỜNG MỘT BƯỚC: chọn người → có video
-POST   /api/projects                   tạo dự án, tự chọn ảnh ngay
-GET    /api/projects/{id}/result        kết quả lọc + lý do loại + tóm tắt chương
-PATCH  /api/projects/{id}/filters       đổi ngưỡng, tính lại
-POST   /api/projects/{id}/exclude       bỏ / lấy lại một ảnh
-POST   /api/projects/{id}/storyboard    cấu trúc chuyện + thời lượng thật
-POST   /api/projects/{id}/render        dựng video
-GET    /api/renders/{id}                tiến độ
-GET    /api/renders/{id}/video          tải mp4
-GET    /api/thumb/{asset}/{fidx}        thumbnail mặt (fidx âm = đoạn video)
-GET    /api/aligned/{asset}/{fidx}      xem trước frame đã align
+GET    /api/health                     indexer / ffmpeg / auth status
+GET    /api/people                     list of clusters
+GET    /api/people/{id}/similar        suggest clusters of the same person (seeds= to widen)
+GET    /api/progress                   indexer job progress
+POST   /api/videos                     ONE-STEP PATH: pick a person → get a video
+POST   /api/projects                   create a project, selecting photos immediately
+GET    /api/projects/{id}/result        filter results + rejection reasons + chapter summary
+PATCH  /api/projects/{id}/filters       change thresholds, recompute
+POST   /api/projects/{id}/exclude       drop / restore a photo
+POST   /api/projects/{id}/storyboard    story structure + real duration
+POST   /api/projects/{id}/render        render the video
+GET    /api/renders/{id}                progress
+GET    /api/renders/{id}/video          download the mp4
+GET    /api/thumb/{asset}/{fidx}        face thumbnail (negative fidx = video clip)
+GET    /api/aligned/{asset}/{fidx}      preview an aligned frame
 ```
 
-## Phụ thuộc vào indexer
+## Dependency on the indexer
 
-Service cần `fp_face.kps` lưu **toạ độ chuẩn hoá 0..1**. Bản indexer đầu tiên
-lưu pixel của ảnh đã resize — không align lại được ở kích thước khác. Đã sửa,
-kèm cột mới `eye_ratio`.
+The service needs `fp_face.kps` stored as **normalised 0..1 coordinates**. The
+first version of the indexer stored pixels of the resized image — impossible to
+re-align at a different size. Fixed, along with a new `eye_ratio` column.
 
-Nếu bạn đã chạy indexer trước bản sửa này:
+If you ran the indexer before that fix:
 
 ```bash
 cd ../indexer
@@ -529,56 +566,69 @@ python job.py --reset landmarks
 python job.py --stage landmarks
 ```
 
-`app.py --check` và `/api/health` sẽ báo nếu `kps` còn thiếu.
+`app.py --check` and `/api/health` will tell you if `kps` is still missing.
 
-## Giới hạn đã biết
+## Known limitations
 
-- `MAX_FRAMES` chặn ở 1200 frame. Cao hơn thì align tốn nhiều thời gian và
-  video quá dài.
-- Render đọc ảnh **preview** của Immich (thường 1440px), không phải ảnh gốc.
-  Đủ cho khung 720–1024. Muốn cao hơn thì indexer phải lưu thêm `originalPath`.
-- Ảnh không có EXIF ngày chụp sẽ dùng ngày file, dễ dồn cục vào ngày scan.
-  Job indexer in cảnh báo khi phát hiện; sửa trong Immich rồi chạy lại.
-- Người có ít hơn ~20 ảnh trải theo thời gian thì video sẽ nhảy, không mượt.
+- `MAX_FRAMES` caps out at 1200 frames. Above that, alignment takes a long time
+  and the video is too long anyway.
+- Rendering reads Immich's **preview** images (usually 1440px), not the originals.
+  Enough for a 720–1024 frame. For anything higher the indexer would have to store
+  `originalPath` as well.
+- Photos with no EXIF capture date fall back to the file date, which tends to
+  clump everything onto the scan date. The indexer job prints a warning when it
+  detects this; fix it in Immich and run again.
+- A person with fewer than roughly 20 photos spread over time gives a jumpy video,
+  not a smooth one.
 
-## Kiểm thử
+## Testing
 
 ```bash
-python selftest.py                    # không cần Postgres / Immich / ffmpeg
-python selftest.py --dump /tmp/frames  # ghi thêm vài frame mẫu để nhìn bằng mắt
+python selftest.py                    # no Postgres / Immich / ffmpeg needed
+python selftest.py --dump /tmp/frames  # also writes a few sample frames to eyeball
 ```
 
-Chạy được vì phần dễ vỡ nhất lại là phần thuần tính toán. Script nhồi module rỗng
-vào `sys.modules` cho `psycopg` để qua bước import, rồi thay `media.load` bằng ảnh
-sinh sẵn và thay pipe ffmpeg bằng bộ đếm. Verify:
+This works because the most fragile part happens to be pure computation. The
+script stuffs an empty module into `sys.modules` for `psycopg` to get past the
+import, then swaps `media.load` for generated images and the ffmpeg pipe for a
+counter. It verifies:
 
-- chia chương, `auto` chọn đúng mức mịn nhất còn vừa ngân sách
-- ngân sách 30/60/120 giây ra thời lượng tương ứng, không chương nào trống
-- storyboard: `Σ hold = tổng frame`, `hold ≥ xfade` (không bao giờ chồng ba lớp),
-  `start` các shot nối tiếp đúng, điểm nhấn giữ lâu hơn ảnh phụ
-- tự suy độ dài: thư viện dày cho video dài hơn thư viện mỏng, cả hai đều dưới
-  trần 150 giây; đặt tay `target_seconds` thì tắt tự suy, gửi `null` thì bật lại
-- chương liền mạch: không chia theo tháng khi phần lớn tháng rỗng
-- nhóm người: `["a","b"]` là một người hai cụm còn `[["a","b"],["c"]]` là hai
-  người; `together` chỉ lấy ảnh có mặt đủ; một ảnh chỉ ra một frame
-- neo hai mặt: hai điểm neo nằm ngang (không xoay ảnh), trung điểm đúng giữa hai
-  người, khoảng cách bằng khoảng cách thật, và không chia cho 0 khi hai mặt trùng
-- tiếng: J-cut/L-cut đặt đúng chỗ, `adelay` không bao giờ âm, `atrim` không bao
-  giờ âm, `tail` không đọc quá cuối file, `amix normalize=0`, `apad` phủ hết độ dài
-- đoạn video: được chọn vào video, đoạn rung bị loại kèm lý do, `use_clips=false`
-  thì không đoạn nào vào, đoạn giữ đúng độ dài thật, không zoom Ken Burns, tổng
-  thời lượng bị chặn, và đoạn mở đầu không bị kéo dài cho thẻ tiêu đề
-- **neo khuôn mặt đang di chuyển**: sinh một mp4 thật bằng `cv2.VideoWriter` với
-  một khối sáng di chuyển đều, dựng `track` tương ứng, rồi kiểm chủ thể có nằm
-  đúng điểm neo ở mọi frame và **không trôi** trong cả đoạn
-- vẽ chữ có dấu, alpha thấp thì mờ hơn
-- vòng lặp dựng frame ghi **đúng** số frame mà storyboard hứa, frame đầu và cuối
-  gần như đen (mở/đóng màn), và thẻ tiêu đề / nhãn chương thật sự có lớp tối cùng
-  nét chữ trắng trên frame thật
+- chapter splitting, and that `auto` picks the finest granularity that still fits
+  the budget
+- 30/60/120-second budgets produce matching durations, with no empty chapter
+- storyboard: `Σ hold = total frames`, `hold ≥ xfade` (never three layers
+  overlapping), consecutive shot `start` values line up, hero shots held longer
+  than supporting shots
+- duration inference: a dense library gives a longer video than a thin one, both
+  under the 150-second ceiling; setting `target_seconds` by hand turns inference
+  off, sending `null` turns it back on
+- chapter continuity: no splitting by month when most months are empty
+- person grouping: `["a","b"]` is one person with two clusters while
+  `[["a","b"],["c"]]` is two people; `together` keeps only photos containing all of
+  them; one photo yields one frame
+- two-face anchoring: the two anchor points are horizontal (no image rotation), the
+  midpoint sits exactly between the two people, the separation matches the real
+  distance, and there is no division by zero when the two faces coincide
+- audio: J-cuts/L-cuts land in the right place, `adelay` is never negative,
+  `atrim` is never negative, `tail` never reads past the end of the file,
+  `amix normalize=0`, `apad` covers the full duration
+- clips: they get selected into the video, shaky clips are rejected with a reason,
+  `use_clips=false` lets none through, clips keep their real length, no Ken Burns
+  zoom is applied, the total duration is capped, and an opening clip is not
+  extended for the title card
+- **anchoring a moving face**: generates a real mp4 with `cv2.VideoWriter`
+  containing a bright block moving at a constant rate, builds the matching `track`,
+  then checks the subject sits on the anchor point in every frame and **does not
+  drift** across the segment
+- accented text rendering, and that lower alpha comes out fainter
+- the frame-building loop writes **exactly** the frame count the storyboard
+  promised, the first and last frames are near black (fade up/close out), and the
+  title card / chapter labels really do produce a darkened layer plus white
+  lettering on real frames
 
-CI chạy script này trước khi build image (job `check` trong
-`.github/workflows/build-images.yml`), nên logic vỡ thì không có image nào được
-đẩy lên GHCR.
+CI runs this script before building images (the `check` job in
+`.github/workflows/build-images.yml`), so broken logic means no image gets pushed
+to GHCR.
 
-Phần cần Postgres/ffmpeg thì verify trên máy đích bằng `python app.py --check` và
-`GET /api/health`.
+The parts that need Postgres/ffmpeg get verified on the target machine with
+`python app.py --check` and `GET /api/health`.

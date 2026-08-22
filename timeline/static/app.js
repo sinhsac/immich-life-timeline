@@ -1,6 +1,7 @@
 'use strict';
-// UI bon buoc. Khong dung framework: mot file, doc tu tren xuong duoc.
-// Token lay tu ?token=... tren URL roi nho lai, de mo duoc khi service bat auth.
+// Four-step UI. No framework: a single file you can read top to bottom.
+// Token is taken from ?token=... on the URL then remembered, so the page still
+// opens when the service has auth switched on.
 
 const TOKEN = new URLSearchParams(location.search).get('token')
   || localStorage.getItem('tl_token') || '';
@@ -11,12 +12,12 @@ const S = {
   result: null, renderId: null, poll: null, postures: [], orients: [],
   statusTimer: null, prevTimer: null, sbTimer: null, sb: null, out: null,
   picked: new Map(), people: [], sug: [], view: 1,
-  // Moi phan tu la MOT NGUOI: {name, ids:[cluster...]}. Rong = tat ca cum dang
-  // chon thuoc cung mot nguoi (truong hop pho bien nhat).
+  // Each element is ONE PERSON: {name, ids:[cluster...]}. Empty = all the
+  // currently selected clusters belong to the same person (the common case).
   subjects: [],
 };
 
-const num = (n) => (n || 0).toLocaleString('vi-VN');
+const num = (n) => (n || 0).toLocaleString('en-US');
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
@@ -32,7 +33,7 @@ async function api(path, opts = {}) {
   const r = await fetch('/api' + path, Object.assign({}, opts, {headers: h}));
   if (!r.ok) {
     let msg = r.statusText;
-    try { msg = (await r.json()).detail || msg; } catch (e) { /* body rong */ }
+    try { msg = (await r.json()).detail || msg; } catch (e) { /* empty body */ }
     throw new Error(msg);
   }
   return r.status === 204 ? null : r.json();
@@ -43,8 +44,9 @@ const imgUrl = (kind, key, size) => {
   return `/api/${kind}/${a}/${f}?size=${size}` + (TOKEN ? `&token=${TOKEN}` : '');
 };
 
-// Khung hinh cua video: khuon mat chi la diem neo, face_frac quyet dinh lay
-// rong hay hep. Preview phai dung dung bo tham so nay moi khong noi doi.
+// Framing of the video: the face is only the anchor point, face_frac decides
+// whether we crop wide or tight. The preview must use exactly this set of
+// parameters, otherwise it lies about the result.
 function framingOpts() {
   return {
     aspect: $('r_aspect').value,
@@ -76,7 +78,7 @@ function step(n) {
   document.querySelectorAll('.step').forEach((s) => s.classList.remove('on'));
   $('s' + n).classList.add('on');
   $('navStats').classList.remove('on');
-  // #navStats khong co data-step nen vong nay khong bat/tat no, chi bo .on
+  // #navStats has no data-step so this loop never toggles it, we only drop .on
   document.querySelectorAll('#steps button').forEach((b) => {
     b.classList.toggle('on', b.dataset.step === String(n));
   });
@@ -84,23 +86,26 @@ function step(n) {
   window.scrollTo(0, 0);
 }
 
-// Mo cac buoc 2/3/4 khi da co du an. Truoc day dieu kien la "step <= n" nen
-// bam sang buoc 5 la mo luon ca 2/3/4 du chua co gi trong do.
+// Unlock steps 2/3/4 once a project exists. Previously the condition was
+// "step <= n", so pressing step 5 also unlocked 2/3/4 even though there was
+// nothing in them yet.
 function unlockSteps() {
   document.querySelectorAll('#steps button[data-step]').forEach((b) => {
     if (b.dataset.step !== '1') b.disabled = !S.projectId;
   });
 }
 
-// Che do chuyen gia chi la mot lop CSS: cac phan .adv an di khi tat. Nho vay
-// duong mac dinh khong co mot thanh truot nao, ma khong phai dung hai UI.
+// Expert mode is just a CSS class: the .adv sections hide when it is off. That
+// way the default path shows not a single slider, without having to build two
+// separate UIs.
 function setExpert(on) {
   document.body.classList.toggle('expert', !!on);
   $('expert').checked = !!on;
   localStorage.setItem('tl_expert', on ? '1' : '0');
 }
 
-// Trang thong ke: khong thuoc luong 4 buoc, vao ra khong lam mat tien do dang lam.
+// Statistics page: not part of the 4-step flow, so entering and leaving it
+// never loses the progress already made.
 function showStats() {
   document.querySelectorAll('.step').forEach((s) => s.classList.remove('on'));
   document.querySelectorAll('#steps button').forEach((b) => b.classList.remove('on'));
@@ -108,10 +113,10 @@ function showStats() {
   $('navStats').classList.add('on');
   S.view = 'stats';
   window.scrollTo(0, 0);
-  pollStatus();                 // lam moi ngay khi mo, khong doi chu ky 20s
+  pollStatus();                 // refresh on open, do not wait for the 20s cycle
 }
 
-// ================================================================ khoi dong
+// ================================================================= start up
 (async function init() {
   document.querySelectorAll('#steps button').forEach((b) => {
     b.onclick = () => { if (!b.disabled) step(Number(b.dataset.step)); };
@@ -170,8 +175,9 @@ function showStats() {
       $('gridSel').classList.toggle('hide', !sel);
       $('gridRej').classList.toggle('hide', sel);
       $('tabHint').textContent = sel
-        ? 'Bấm vào ảnh để bỏ khỏi video.'
-        : 'Ảnh gần đạt nằm trên. Nếu thấy nhiều ảnh tốt bị loại, nới ngưỡng tương ứng bên trái.';
+        ? 'Click a photo to drop it from the video.'
+        : 'Near misses come first. If you see good photos being rejected, loosen '
+          + 'the matching threshold on the left.';
     };
   });
   ['r_fps', 'r_eye_y', 'r_face_frac'].forEach((id) => {
@@ -196,7 +202,7 @@ function showStats() {
     setFilterUI(S.defaults.filters);
     await loadPeople();
   } catch (e) {
-    $('health').innerHTML = `<div class="err">Không gọi được API: ${e.message}</div>`;
+    $('health').innerHTML = `<div class="err">Cannot reach the API: ${e.message}</div>`;
   }
 })();
 
@@ -205,80 +211,87 @@ function showHealth(h) {
   if (!h.indexer.ok) bits.push(`<div class="err">Indexer: ${h.indexer.detail}</div>`);
   if (!h.ffmpeg.ok) bits.push(`<div class="err">ffmpeg: ${h.ffmpeg.detail}</div>`);
   if (h.text && !h.text.ok) {
-    bits.push('<div class="warn">Không tìm thấy font TTF nên nhãn chương và tên '
-      + `sẽ bị bỏ dấu (${h.text.detail}). Cài <code>pillow</code> + `
-      + '<code>fonts-dejavu-core</code>, hoặc đặt <code>FONT_FILE</code>.</div>');
+    bits.push('<div class="warn">No TTF font found, so chapter labels and names '
+      + `will have their accents stripped (${h.text.detail}). Install `
+      + '<code>pillow</code> + <code>fonts-dejavu-core</code>, or set '
+      + '<code>FONT_FILE</code>.</div>');
   }
-  if (!h.auth) bits.push('<div class="warn">Service đang không có xác thực (API_TOKEN trống).</div>');
+  if (!h.auth) {
+    bits.push('<div class="warn">This service is running with no authentication '
+      + '(API_TOKEN is empty).</div>');
+  }
   if (h.indexer.ok && h.ffmpeg.ok) bits.push(`<span class="muted">${h.indexer.detail}</span>`);
   $('health').innerHTML = bits.join('');
 }
 
-// ========================================================= tien do indexer
-// Job indexer chay ngoai service nay (CronJob rieng), nen UI chi doc trang thai
-// tu cac cot state trong fp_asset. Tu dong tat polling khi da xong.
+// ======================================================== indexer progress
+// The indexer job runs outside this service (its own CronJob), so the UI only
+// reads status from the state columns in fp_asset. Polling switches itself off
+// once everything is done.
 function showProgress(p) {
-  // Nhan tren nav: chi mot con so, de nguoi dung biet co can mo trang thong ke
-  // hay khong ma khong chiem cho tren cac buoc khac.
+  // Label on the nav: just one number, so the user can tell whether the
+  // statistics page is worth opening, without it taking room from the other
+  // steps.
   const nav = $('navStats');
   if (p.ready) {
     const done = p.stages.reduce((a, s) => a + s.done, 0);
     const total = p.stages.reduce((a, s) => a + s.total, 0) || 1;
     const pct = Math.round(100 * done / total);
-    nav.textContent = `Thống kê · ${pct}%`;
+    nav.textContent = `Statistics · ${pct}%`;
     nav.classList.toggle('warnDot', !!p.running);
   } else {
-    nav.textContent = 'Thống kê';
+    nav.textContent = 'Statistics';
   }
 
   if (!p.ready) {
     $('idxCards').innerHTML = '';
-    $('idxBars').innerHTML = '<p class="muted">Chưa có bảng fp_asset — '
-      + 'job indexer chưa chạy lần nào.</p>';
+    $('idxBars').innerHTML = '<p class="muted">No fp_asset table yet — the '
+      + 'indexer job has never run.</p>';
     $('idxRuns').innerHTML = '';
     return;
   }
 
   $('idxCards').innerHTML = [
-    ['n_asset', 'ảnh trong thư viện'],
-    ['n_face', 'khuôn mặt'],
-    ['n_face_ready', 'face có landmark'],
-    ['n_body', 'thân người'],
+    ['n_asset', 'photos in the library'],
+    ['n_face', 'faces'],
+    ['n_face_ready', 'faces with landmarks'],
+    ['n_body', 'bodies'],
   ].map(([k, lab]) => `<div class="card"><b>${num(p[k])}</b><span>${lab}</span></div>`)
     .join('')
     + (((p.face_err || 0) + (p.body_err || 0))
       ? `<div class="card"><b class="bad">${num((p.face_err || 0) + (p.body_err || 0))}</b>`
-        + '<span>ảnh lỗi đọc</span></div>' : '');
+        + '<span>photos that failed to read</span></div>' : '');
 
   $('idxBars').innerHTML = p.stages.map((s) => {
     const left = Math.max(0, s.total - s.done);
     return `<div class="prow${p.running === s.name ? ' run' : ''}">`
       + `<span class="plab">${s.label}`
-      + (p.running === s.name ? ' <b>đang chạy</b>' : '') + '</span>'
+      + (p.running === s.name ? ' <b>running</b>' : '') + '</span>'
       + `<span class="pbar"><i style="width:${Math.min(100, s.pct)}%"></i></span>`
       + `<span class="pnum">${s.pct}%<em>${num(s.done)}/${num(s.total)}`
-      + (left ? ` · còn ${num(left)}` : '') + '</em></span></div>';
+      + (left ? ` · ${num(left)} left` : '') + '</em></span></div>';
   }).join('')
     + (p.running
       ? ''
-      : '<p class="muted">Không có stage nào đang chạy. Job kế tiếp sẽ tiếp tục '
-        + 'đúng chỗ dở — tiến độ nằm trong database, không mất khi tắt máy.</p>');
+      : '<p class="muted">No stage is running. The next job picks up exactly '
+        + 'where this one stopped — progress lives in the database, so nothing '
+        + 'is lost when the machine goes down.</p>');
 
   $('idxRuns').innerHTML = (p.runs || []).length
-    ? '<table class="runs"><tr><th>Stage</th><th>Bắt đầu</th><th>Xong</th>'
-      + '<th>Kết quả</th><th>Lỗi</th><th>Ghi chú</th></tr>'
+    ? '<table class="runs"><tr><th>Stage</th><th>Started</th><th>Finished</th>'
+      + '<th>Processed</th><th>Errors</th><th>Note</th></tr>'
       + p.runs.map((r) => '<tr>'
         + `<td>${r.stage}</td>`
         + `<td>${(r.started_at || '').slice(0, 19).replace('T', ' ')}</td>`
-        + `<td>${r.running ? '<b>đang chạy</b>'
+        + `<td>${r.running ? '<b>running</b>'
           : (r.finished_at || '').slice(11, 19)}</td>`
         + `<td>${num(r.n_done)}</td>`
         + `<td>${r.n_err ? `<span class="bad">${num(r.n_err)}</span>` : '0'}</td>`
         + `<td class="muted">${r.note || ''}</td></tr>`).join('')
       + '</table>'
-    : '<p class="muted">chưa có lần chạy nào</p>';
+    : '<p class="muted">no runs yet</p>';
 
-  $('statsAt').textContent = 'cập nhật ' + new Date().toLocaleTimeString('vi-VN');
+  $('statsAt').textContent = 'updated ' + new Date().toLocaleTimeString('en-US');
 }
 
 const progressDone = (p) => p.ready && p.stages.every((s) => s.done >= s.total);
@@ -289,24 +302,24 @@ async function pollStatus() {
     const [h, p] = await Promise.all([api('/health'), api('/progress')]);
     showHealth(h);
     showProgress(p);
-    if (progressDone(p)) return;            // xong roi thi thoi, khong poll nua
+    if (progressDone(p)) return;            // all done, so stop polling for good
   } catch (e) {
-    wait = 60000;                           // loi thi giãn ra, dung dap lien tuc
+    wait = 60000;                           // on error back off, do not hammer it
   }
   clearTimeout(S.statusTimer);
   S.statusTimer = setTimeout(pollStatus, wait);
 }
 
-// ================================================================ buoc 1
+// ================================================================ step 1
 async function loadPeople() {
-  $('people').innerHTML = '<p class="muted">đang tải…</p>';
+  $('people').innerHTML = '<p class="muted">loading…</p>';
   try {
     const d = await api('/people?min_ready=' + Number($('minReady').value || 10));
-    $('peopleCount').textContent = `${d.people.length} người`;
+    $('peopleCount').textContent = `${d.people.length} people`;
     $('people').innerHTML = '';
     if (!d.people.length) {
-      $('people').innerHTML = '<p class="muted">Chưa có người nào. Immich đã chạy '
-        + 'Facial Recognition và job indexer đã xong chưa?</p>';
+      $('people').innerHTML = '<p class="muted">No people yet. Has Immich '
+        + 'finished Facial Recognition, and has the indexer job finished?</p>';
       return;
     }
     S.people = d.people;
@@ -317,10 +330,15 @@ async function loadPeople() {
   }
 }
 
-// Nguong tu dong chon. Do tren thu vien thuc: cum cung nguoi ~0.55, con mot
-// nguoi KHAC da dat ten dat 0.44 -> 0.5 la vach hop ly, va con loc them
-// name_conflict. Cao hon vach nay thi tu tich san, nguoi dung chi viec bo ra.
+// Auto-select threshold. Measured on a real library: clusters of the same
+// person score ~0.55, while a DIFFERENT person who already had a name reached
+// 0.44 -> 0.5 is a sensible line, and name_conflict filters on top of it.
+// Anything above this line is ticked for you, the user only has to untick.
 const AUTO_SIM = 0.5;
+
+// The reason string the server writes when a photo is dropped by hand. Must match
+// select.MANUAL_REASON: only these rejects can be put back by clicking them.
+const MANUAL_REASON = 'dropped by hand';
 
 function personNode(p, sim, isSug) {
   const n = el('div', 'person' + (isSug ? ' sug' : ''));
@@ -335,15 +353,15 @@ function personNode(p, sim, isSug) {
     + (sim !== undefined
       ? `<div class="sim${p.name_conflict ? ' clash' : ''}">${Math.round(sim * 100)}%</div>`
       : '')
-    + `<div class="nm">${p.name || '(chưa đặt tên)'}</div>`
-    + `<div class="mt">${p.n_ready} ảnh · ${p.n_month} tháng · ${years}</div>`
-    + (p.name_conflict ? '<div class="clashw">đã có tên khác</div>' : '');
+    + `<div class="nm">${p.name || '(unnamed)'}</div>`
+    + `<div class="mt">${p.n_ready} photos · ${p.n_month} months · ${years}</div>`
+    + (p.name_conflict ? '<div class="clashw">already named as someone else</div>' : '');
   n.onclick = () => togglePick(p);
   return n;
 }
 
-// Immich tach mot nguoi thanh nhieu cluster theo do tuoi, nen o day chon
-// duoc nhieu cluster. S.picked la Map person_id -> thong tin cluster.
+// Immich splits one person into several clusters by age, so here you can pick
+// several clusters. S.picked is a Map person_id -> cluster info.
 function togglePick(p) {
   if (S.picked.has(p.person_id)) S.picked.delete(p.person_id);
   else S.picked.set(p.person_id, p);
@@ -361,8 +379,8 @@ function syncPicked() {
   $('addSubject').disabled = n === 0;
   $('mkVideo').disabled = n === 0 && !S.subjects.length;
   if (!n) {
-    $('pickInfo').innerHTML = '<span class="muted">chọn thêm cụm, hoặc bấm '
-      + 'Tạo video</span>';
+    $('pickInfo').innerHTML = '<span class="muted">select more clusters, or press '
+      + 'Create video</span>';
     $('pickNames').textContent = '';
     return;
   }
@@ -372,24 +390,25 @@ function syncPicked() {
   const last = list.map((p) => p.last_seen).filter(Boolean).sort();
   const span = years.length && last.length
     ? ` · ${years[0].slice(0, 4)}–${last[last.length - 1].slice(0, 4)}` : '';
-  $('pickInfo').innerHTML = `<b>${n}</b> cụm · ${num(ready)} ảnh${span}`;
+  $('pickInfo').innerHTML = `<b>${n}</b> clusters · ${num(ready)} photos${span}`;
   $('pickNames').textContent = list
-    .map((p) => p.name || '(chưa tên)').join(', ');
+    .map((p) => p.name || '(unnamed)').join(', ');
 }
 
-// "Video của ông A với bà B": mỗi người là một nhóm cụm riêng. Không suy ra
-// được từ một mớ cụm lẫn lộn, nên phải chốt từng người một.
+// "A video of Mr A with Mrs B": each person is their own group of clusters.
+// That cannot be inferred from one jumbled pile of clusters, so each person has
+// to be committed one at a time.
 function addSubject() {
   const list = [...S.picked.values()];
   if (!list.length) return;
   S.subjects.push({
-    name: list.map((p) => p.name).filter(Boolean)[0] || '(chưa tên)',
+    name: list.map((p) => p.name).filter(Boolean)[0] || '(unnamed)',
     ids: list.map((p) => p.person_id),
   });
   S.picked.clear();
   syncPicked();
-  toast(`Đã thêm ${S.subjects[S.subjects.length - 1].name}. `
-    + 'Giờ chọn cụm của người tiếp theo.');
+  toast(`Added ${S.subjects[S.subjects.length - 1].name}. `
+    + 'Now select the clusters of the next person.');
 }
 
 function showSubjects() {
@@ -399,7 +418,7 @@ function showSubjects() {
   $('subjChips').innerHTML = '';
   S.subjects.forEach((s, i) => {
     const b = el('button', 'chip',
-      `${s.name} <em>${s.ids.length} cụm</em> ×`);
+      `${s.name} <em>${s.ids.length} clusters</em> ×`);
     b.onclick = () => { S.subjects.splice(i, 1); syncPicked(); };
     $('subjChips').appendChild(b);
   });
@@ -407,8 +426,9 @@ function showSubjects() {
     S.subjects.length + (S.picked.size ? 1 : 0) < 2);
 }
 
-// Danh sách người cuối cùng gửi lên: các người đã chốt + các cụm đang chọn dở
-// (coi là một người nữa). Chưa chốt ai thì tất cả cụm đang chọn = một người.
+// Final list of people sent up: the people already committed + the clusters
+// still half-selected (counted as one more person). With nobody committed yet,
+// all the selected clusters = one person.
 function subjectPayload() {
   const groups = S.subjects.map((s) => s.ids);
   const cur = [...S.picked.keys()];
@@ -420,14 +440,14 @@ function subjectName() {
   const names = S.subjects.map((s) => s.name);
   const cur = [...S.picked.values()].map((p) => p.name).filter(Boolean);
   if (cur.length) names.push(cur[0]);
-  return names.filter((n) => n && n !== '(chưa tên)').join(' & ');
+  return names.filter((n) => n && n !== '(unnamed)').join(' & ');
 }
 
 async function findSimilar() {
   if (!S.picked.size) return;
   const seeds = [...S.picked.keys()];
   $('findSim').disabled = true;
-  $('simList').innerHTML = '<p class="muted">đang so khớp embedding…</p>';
+  $('simList').innerHTML = '<p class="muted">matching embeddings…</p>';
   $('simNote').textContent = '';
   $('simBox').classList.remove('hide');
   try {
@@ -436,33 +456,37 @@ async function findSimilar() {
       + '&seeds=' + encodeURIComponent(seeds.join(',')));
     S.sug = d.similar || [];
     if (!S.sug.length) {
-      $('simHead').textContent = 'Không thấy cụm nào đủ giống';
+      $('simHead').textContent = 'No cluster was similar enough';
       $('simList').innerHTML = '';
-      $('simNote').textContent = 'Hạ ngưỡng "Giống nhau ≥" xuống rồi tìm lại '
-        + `nếu muốn rộng hơn. Đã so với ${num(d.n_cluster)} cụm.`;
+      $('simNote').textContent = 'Lower the "Similarity ≥" threshold and search '
+        + `again to widen the net. Compared against ${num(d.n_cluster)} clusters.`;
       return;
     }
 
-    // Tu chon nhung cum du chac, de khong phai bam tung cai.
+    // Auto-tick the clusters that are certain enough, so there is no need to
+    // click them one by one.
     const auto = S.sug.filter((p) => !p.name_conflict && p.similarity >= AUTO_SIM);
     auto.forEach((p) => S.picked.set(p.person_id, p));
 
-    $('simHead').textContent = `${S.sug.length} cụm có vẻ cùng người này`;
+    $('simHead').textContent = `${S.sug.length} clusters look like the same person`;
     $('simList').innerHTML = '';
     S.sug.forEach((p) => $('simList').appendChild(personNode(p, p.similarity, true)));
     syncPicked();
 
     const pct = Math.round(AUTO_SIM * 100);
-    $('simNote').innerHTML = `Đã so với ${num(d.n_cluster)} cụm. `
+    $('simNote').innerHTML = `Compared against ${num(d.n_cluster)} clusters. `
       + (auto.length
-        ? `<b>Đã tự tích ${auto.length} cụm</b> đạt từ ${pct}% trở lên và không `
-          + 'trùng tên khác — bỏ tích nếu thấy sai.'
-        : `Không cụm nào đạt ${pct}% để tự tích, bạn tự chọn theo ảnh.`)
-      + ' Chọn thêm rồi bấm "Tìm cụm cùng người" lần nữa để lan tiếp.';
+        ? `<b>${auto.length} clusters were ticked automatically</b> — they scored `
+          + `${pct}% or above and carry no conflicting name. Untick any that look `
+          + 'wrong.'
+        : `No cluster reached ${pct}%, so nothing was ticked automatically — `
+          + 'select them yourself by looking at the photos.')
+      + ' Select more, then press "Find clusters of the same person" again to '
+      + 'keep widening the net.';
     $('simBox').scrollIntoView({behavior: 'smooth', block: 'start'});
     toast(auto.length
-      ? `Tự chọn ${auto.length}/${S.sug.length} cụm gợi ý`
-      : `Thấy ${S.sug.length} cụm gợi ý, chưa tự chọn cụm nào`);
+      ? `Auto-selected ${auto.length}/${S.sug.length} suggested clusters`
+      : `Found ${S.sug.length} suggested clusters, none selected automatically`);
   } catch (e) {
     $('simList').innerHTML = `<div class="err">${e.message}</div>`;
   } finally {
@@ -475,7 +499,8 @@ function pickAllSuggestions() {
   if (!ok.length) return;
   ok.forEach((p) => S.picked.set(p.person_id, p));
   syncPicked();
-  toast(`Đã chọn ${ok.length} cụm gợi ý (bỏ qua cụm đã có tên khác)`);
+  toast(`Selected ${ok.length} suggested clusters `
+    + '(skipping the ones already named as someone else)');
 }
 
 function requestBody() {
@@ -501,15 +526,16 @@ function rememberPerson() {
   };
 }
 
-// ĐƯỜNG MẶC ĐỊNH: một lần bấm, không setup gì. Một request duy nhất tạo dự án,
-// chọn ảnh và bắt đầu dựng — server tự suy mọi ngưỡng và độ dài.
+// DEFAULT PATH: one press, no setup at all. A single request creates the
+// project, selects the photos and starts the render — the server infers every
+// threshold and the length itself.
 async function makeVideo() {
   if (!S.picked.size && !S.subjects.length) return;
   rememberPerson();
   $('mkVideo').disabled = true;
   step(5);
-  $('outHead').innerHTML = '<h3>Đang chọn ảnh…</h3>';
-  $('renderState').innerHTML = '<p class="muted">đang đọc dữ liệu khuôn mặt…</p>';
+  $('outHead').innerHTML = '<h3>Selecting photos…</h3>';
+  $('renderState').innerHTML = '<p class="muted">reading face data…</p>';
   $('player').classList.add('hide');
   $('outStory').innerHTML = '';
   try {
@@ -527,14 +553,15 @@ async function makeVideo() {
     unlockSteps();
     showOut(r);
 
-    // ffmpeg can it nhat 2 frame. Duoi nguong do thi khong render bua roi bao
-    // loi kho hieu — bat che do chuyen gia va day sang cho noi nguong.
+    // ffmpeg needs at least 2 frames. Below that, do not render blindly and
+    // then report a cryptic error — turn on expert mode and push the user over
+    // to where the thresholds are.
     if (!r.render_id) {
       setExpert(true);
       step(3);
       renderResult();
-      toast(`Chỉ chọn được ${r.n_selected} ảnh, cần ít nhất 2. `
-        + 'Nới ngưỡng bên trái rồi bấm Áp dụng.', true);
+      toast(`Only ${r.n_selected} photos were selected, at least 2 are needed. `
+        + 'Loosen the thresholds on the left, then press Apply.', true);
       return;
     }
     S.renderId = r.render_id;
@@ -548,7 +575,8 @@ async function makeVideo() {
   }
 }
 
-// Duong chuyen gia: chi tao du an roi dung lai o buoc xem anh da chon.
+// Expert path: only create the project, then stop at the step that shows the
+// photos that were selected.
 async function openAdvanced() {
   if (!S.picked.size && !S.subjects.length) return;
   rememberPerson();
@@ -572,24 +600,24 @@ async function openAdvanced() {
   }
 }
 
-// ------------------------------------------------------------- trang video
+// -------------------------------------------------------------- video page
 function showOut(r) {
   const p = S.person || {};
   const st = r.story;
-  const who = p.name || '(chưa đặt tên)';
+  const who = p.name || '(unnamed)';
   const range = [$('dFrom').value, $('dTo').value].filter(Boolean).join(' → ');
   $('outHead').innerHTML = `<h3>${who}</h3>`
     + '<p class="muted">'
-    + (st ? `${r.n_selected} shot · ${st.n_chapter} chương`
-      + (st.n_clip ? ` · ${st.n_clip} đoạn video` : '') + ` · ${st.grain_label}`
-      : `${r.n_selected} ảnh`)
+    + (st ? `${r.n_selected} shots · ${st.n_chapter} chapters`
+      + (st.n_clip ? ` · ${st.n_clip} video clips` : '') + ` · ${st.grain_label}`
+      : `${r.n_selected} photos`)
     + (range ? ` · ${range}` : '')
     + '</p>';
   $('outStory').innerHTML = '';
 }
 
-// "Ngắn hơn / Dài hơn" thay cho một thanh trượt độ dài: người dùng phản ứng với
-// cái đã thấy, không phải đoán một con số trước khi thấy gì.
+// "Shorter / Longer" instead of a length slider: the user reacts to what they
+// have already seen, rather than guessing a number before seeing anything.
 async function nudgeLength(k) {
   const cur = (S.out && S.out.duration_s)
     || (S.sb && S.sb.duration_s) || 60;
@@ -605,11 +633,11 @@ async function nudgeLength(k) {
     setFilterUI(r.filters);
     showOut(r);
     if (r.n_selected < 2) {
-      toast('Không còn đủ ảnh, thử hướng ngược lại.', true);
+      toast('Not enough photos left, try the other direction.', true);
       return;
     }
     await startRender();
-    toast(`Nhắm khoảng ${t} giây, đang dựng lại…`);
+    toast(`Aiming for about ${t} seconds, re-rendering…`);
   } catch (e) {
     toast(e.message, true);
   } finally {
@@ -617,16 +645,16 @@ async function nudgeLength(k) {
   }
 }
 
-// ================================================================ buoc 2
+// ================================================================ step 2
 function showStep2(r) {
   const p = S.person;
   const how = r.story
-    ? `${r.story.n_chapter} chương · ${r.story.grain_label} · dài ~${r.story.est_seconds}s`
-    : `mỗi ${r.filters.bucket_days} ngày lấy ${r.filters.per_bucket} ảnh`;
-  $('projHead').innerHTML = `<h3>${p.name || '(chưa đặt tên)'}</h3>`
+    ? `${r.story.n_chapter} chapters · ${r.story.grain_label} · ~${r.story.est_seconds}s long`
+    : `${r.filters.per_bucket} photos every ${r.filters.bucket_days} days`;
+  $('projHead').innerHTML = `<h3>${p.name || '(unnamed)'}</h3>`
     + `<p class="muted">${p.first_seen ? p.first_seen.slice(0, 10) : '?'} → `
     + `${p.last_seen ? p.last_seen.slice(0, 10) : '?'}`
-    + (p.n_cluster > 1 ? ` · gộp ${p.n_cluster} cụm` : '')
+    + (p.n_cluster > 1 ? ` · ${p.n_cluster} clusters merged` : '')
     + ` · ${how}</p>`;
   $('n_candidate').textContent = r.n_candidate;
   $('n_pass').textContent = r.n_pass;
@@ -634,9 +662,9 @@ function showStep2(r) {
   $('n_years').textContent = r.timeline.length;
   drawChart(r.timeline);
   $('gaps').innerHTML = r.gaps.length
-    ? '<div class="warn">Khoảng trống dài: '
-      + r.gaps.slice(0, 5).map((g) => `${g.from.slice(0, 7)} → ${g.to.slice(0, 7)} (${g.days} ngày)`).join(', ')
-      + '. Video sẽ nhảy ở những chỗ này.</div>'
+    ? '<div class="warn">Long gaps: '
+      + r.gaps.slice(0, 5).map((g) => `${g.from.slice(0, 7)} → ${g.to.slice(0, 7)} (${g.days} days)`).join(', ')
+      + '. The video will jump at these points.</div>'
     : '';
 }
 
@@ -651,14 +679,15 @@ function drawChart(tl) {
   });
 }
 
-// ================================================================ buoc 3
+// ================================================================ step 3
 const RANGE_KEYS = ['max_yaw', 'max_pitch', 'max_roll', 'min_frontality',
   'min_ear', 'min_eye_ratio', 'min_sharp', 'bucket_days', 'per_bucket',
   'target_seconds', 'max_per_chapter', 'max_clip_motion'];
 const SELECT_KEYS = ['mode', 'pace', 'chapter_by'];
 
-// mode='story' va mode='even' dung hai bo tham so khac nhau. Hien ca hai cung
-// luc thi nguoi dung keo mot thanh khong co tac dung nao ma khong hieu tai sao.
+// mode='story' and mode='even' use two different sets of parameters. Showing
+// both at once means the user drags a slider that has no effect at all, with no
+// idea why.
 function syncMode() {
   const story = $('f_mode').value === 'story';
   $('storyOpts').classList.toggle('hide', !story);
@@ -682,8 +711,8 @@ function setFilterUI(f) {
     const i = $('f_' + k);
     if (i && f[k]) i.value = f[k];
   });
-  // target_seconds = null nghia la "tu suy", khong phai "khong gui". Thanh truot
-  // van giu mot con so hop ly de bo tich la dung duoc ngay.
+  // target_seconds = null means "infer it", not "do not send it". The slider
+  // still holds a sensible number so unticking the box works straight away.
   const auto = f.target_seconds === null || f.target_seconds === undefined;
   $('f_auto_len').checked = auto;
   if (!auto) $('f_target_seconds').value = f.target_seconds;
@@ -710,40 +739,42 @@ function fmt(k, v) {
   return String(v);
 }
 
-// Tom tat cau chuyen: bao nhieu chuong, chuong nao day chuong nao mong. Day la
-// cho nguoi dung nhin ra ngay minh se duoc mot video the nao, truoc khi dung.
+// Story summary: how many chapters, which ones are full and which are thin.
+// This is where the user sees straight away what kind of video they will get,
+// before rendering.
 function showStory(st) {
   const box = $('storyInfo');
   if (!st) {
-    box.innerHTML = '<p class="muted">Chế độ rải đều: thời lượng = số ảnh / '
-      + 'số ảnh mỗi giây, đặt ở bước 4.</p>';
+    box.innerHTML = '<p class="muted">Even spread mode: duration = photo count / '
+      + 'photos per second, set in the render settings.</p>';
     return;
   }
   const max = Math.max(1, ...st.chapters.map((c) => c.n_pick));
   box.innerHTML = `<div class="cards small">`
-    + `<div class="card ok"><b>${st.n_chapter}</b><span>chương</span></div>`
-    + `<div class="card"><b>${st.n_hero}</b><span>điểm nhấn</span></div>`
-    + (st.n_clip ? `<div class="card"><b>${st.n_clip}</b><span>đoạn video</span></div>` : '')
-    + `<div class="card"><b>~${st.est_seconds}s</b><span>dài dự kiến</span></div>`
+    + `<div class="card ok"><b>${st.n_chapter}</b><span>chapters</span></div>`
+    + `<div class="card"><b>${st.n_hero}</b><span>hero shots</span></div>`
+    + (st.n_clip ? `<div class="card"><b>${st.n_clip}</b><span>video clips</span></div>` : '')
+    + `<div class="card"><b>~${st.est_seconds}s</b><span>estimated length</span></div>`
     + (st.auto
-      ? '<div class="card"><b>tự suy</b><span>độ dài</span></div>'
-      : `<div class="card"><b>${st.target_seconds}s</b><span>đặt tay</span></div>`)
+      ? '<div class="card"><b>inferred</b><span>duration</span></div>'
+      : `<div class="card"><b>${st.target_seconds}s</b><span>set by hand</span></div>`)
     + '</div>'
-    + `<p class="muted">${st.grain_label} · điểm nhấn giữ ${st.hold_hero}s, `
-    + `ảnh phụ ${st.hold_beat}s</p>`
-    // Tăng ngân sách mà video không dài thêm thì luôn là một trong hai lý do
-    // này. Không nói ra thì người dùng kéo thanh trượt vô ích.
-    + (st.capped ? '<div class="warn">Mọi chương đã đạt trần '
-      + `<b>${st.max_per_chapter} ảnh/chương</b>. Tăng độ dài mong muốn sẽ không `
-      + 'thêm được ảnh nữa — nâng trần này, hoặc đặt "Một chương là" mịn hơn '
-      + 'để có nhiều chương.</div>' : '')
-    + (st.exhausted && !st.capped ? '<div class="warn">Đã dùng hết ảnh đạt '
-      + 'ngưỡng. Muốn video dài hơn thì nới ngưỡng lọc bên trái.</div>' : '')
+    + `<p class="muted">${st.grain_label} · hero shots held ${st.hold_hero}s, `
+    + `supporting shots ${st.hold_beat}s</p>`
+    // Raising the budget without the video getting longer is always one of these
+    // two reasons. Say which one, or the user drags the slider for nothing.
+    + (st.capped ? '<div class="warn">Every chapter has hit the ceiling of '
+      + `<b>${st.max_per_chapter} photos per chapter</b>. Raising the target `
+      + 'duration will not add any more photos — raise this ceiling, or set "One '
+      + 'chapter covers" to something finer to get more chapters.</div>' : '')
+    + (st.exhausted && !st.capped ? '<div class="warn">Every photo that passes '
+      + 'the thresholds has been used. For a longer video, loosen the filter '
+      + 'thresholds on the left.</div>' : '')
     + '<div class="chapbars">'
-    + st.chapters.map((c) => `<div class="cb" title="${c.n_avail} ảnh đạt ngưỡng`
-      + ` trong giai đoạn này"><span class="cbl">${c.label}</span>`
+    + st.chapters.map((c) => `<div class="cb" title="${c.n_avail} photos pass the`
+      + ` thresholds in this period"><span class="cbl">${c.label}</span>`
       + `<span class="cbb"><i style="width:${Math.round(100 * c.n_pick / max)}%"></i></span>`
-      + `<span class="cbn">${c.n_pick}<em>/${num(c.n_avail)}</em></span></div>`).join('')
+      + `<span class="cbn">${c.n_pick}<em>of ${num(c.n_avail)}</em></span></div>`).join('')
     + '</div>';
 }
 
@@ -786,7 +817,7 @@ function readFilterUI() {
 
 async function applyFilters() {
   $('apply').disabled = true;
-  $('applying').textContent = 'đang tính lại…';
+  $('applying').textContent = 'recomputing…';
   try {
     const r = await api(`/projects/${S.projectId}/filters`, {
       method: 'PATCH',
@@ -811,20 +842,23 @@ function renderResult() {
   $('r_rejected').textContent = r.n_rejected;
   showStory(r.story);
   $('reasons').innerHTML = Object.keys(r.reasons).length
-    ? '<table><tr><th>Lý do loại</th><th>Số ảnh</th></tr>'
+    ? '<table><tr><th>Rejection reason</th><th>Photos</th></tr>'
       + Object.entries(r.reasons).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')
       + '</table>'
-    : '<p class="muted">Không ảnh nào bị loại.</p>';
+    : '<p class="muted">No photo was rejected.</p>';
 
   fillSelected(r);
   const gr = $('gridRej');
   gr.innerHTML = '';
   (r.rejected || []).forEach((f) => gr.appendChild(frameNode(f, false)));
-  if (!$('tabHint').textContent) $('tabHint').textContent = 'Bấm vào ảnh để bỏ khỏi video.';
+  if (!$('tabHint').textContent) {
+    $('tabHint').textContent = 'Click a photo to drop it from the video.';
+  }
 }
 
-// Che do ke chuyen: nhom anh theo CHUONG thay vi mot luoi phang. Nhin thay
-// chuong nao chi co mot anh la biet ngay giai doan nao thieu du lieu.
+// Storytelling mode: group photos by CHAPTER instead of one flat grid. Seeing a
+// chapter that holds only one photo tells you at once which period is short on
+// data.
 function fillSelected(r) {
   const gs = $('gridSel');
   gs.innerHTML = '';
@@ -855,24 +889,24 @@ function frameNode(f, selected) {
   n.innerHTML = `<img loading="lazy" src="${imgUrl('thumb', f.key, 104)}" alt="">`
     + (selected ? '' : `<div class="why">${f.reason || ''}</div>`)
     + (clip ? `<div class="clipTag">▶ ${(f.dur_s || 0).toFixed(1)}s</div>`
-      : (f.hero ? '<div class="heroTag">điểm nhấn</div>' : ''))
+      : (f.hero ? '<div class="heroTag">hero</div>' : ''))
     + `<div class="dt">${dt}</div>`;
   n.title = clip
-    ? [`${dt} · đoạn video`,
-      `từ ${((f.t_start_ms || 0) / 1000).toFixed(1)}s dài ${(f.dur_s || 0).toFixed(1)}s`,
+    ? [`${dt} · video clip`,
+      `from ${((f.t_start_ms || 0) / 1000).toFixed(1)}s, ${(f.dur_s || 0).toFixed(1)}s long`,
       f.t_peak_ms != null
-        ? `khoảnh khắc ở giây ${(f.t_peak_ms / 1000).toFixed(1)} của clip gốc`
+        ? `peak moment at ${(f.t_peak_ms / 1000).toFixed(1)}s of the source clip`
         : '',
-      `chính diện ${f.frontality} · nét ${f.sharp}`,
-      `độ rung ${f.motion}`,
-      f.reason ? `LOẠI: ${f.reason}` : ''].filter(Boolean).join('\n')
+      `frontality ${f.frontality} · sharpness ${f.sharp}`,
+      `shake ${f.motion}`,
+      f.reason ? `REJECTED: ${f.reason}` : ''].filter(Boolean).join('\n')
     : [`${dt}`, `yaw ${f.yaw}° pitch ${f.pitch}° roll ${f.roll}°`,
-      `chính diện ${f.frontality}`, `nét ${f.sharp}`,
-      `${f.n_face} mặt trong ảnh`,
-      f.posture ? `tư thế ${f.posture}/${f.orientation}` : 'không có body pose',
-      f.reason ? `LOẠI: ${f.reason}` : ''].filter(Boolean).join('\n');
+      `frontality ${f.frontality}`, `sharpness ${f.sharp}`,
+      `${f.n_face} faces in the photo`,
+      f.posture ? `posture ${f.posture}/${f.orientation}` : 'no body pose',
+      f.reason ? `REJECTED: ${f.reason}` : ''].filter(Boolean).join('\n');
   if (selected) n.onclick = () => toggle(f, true);
-  else if (f.reason === 'bo tay') n.onclick = () => toggle(f, false);
+  else if (f.reason === MANUAL_REASON) n.onclick = () => toggle(f, false);
   return n;
 }
 
@@ -883,23 +917,24 @@ async function toggle(f, exclude) {
       method: 'POST',
       body: JSON.stringify({asset_id, fidx: Number(fidx), excluded: exclude}),
     });
-    // giu lai danh sach rejected cu de khong mat tab dang xem
+    // keep the old rejected list so the tab being viewed is not lost
     S.result = Object.assign({}, r, {rejected: S.result.rejected});
     renderResult();
-    toast(exclude ? 'Đã bỏ ảnh khỏi video' : 'Đã lấy lại ảnh');
+    toast(exclude ? 'Photo dropped from the video' : 'Photo put back');
   } catch (e) {
     toast(e.message, true);
   }
 }
 
-// ================================================================ buoc 4
-// Xem truoc 3 frame cach xa nhau ve thoi gian. Moi anh phai tai qua Immich API
-// nen debounce, khong goi theo tung buoc keo thanh truot.
+// ================================================================ step 4
+// Preview 3 frames spread far apart in time. Every photo has to be fetched
+// through the Immich API, so debounce it instead of firing on every step of the
+// slider.
 function renderPreview() {
   const sel = (S.result && S.result.selected) || [];
   const box = $('framePreview');
   if (!sel.length) {
-    box.innerHTML = '<p class="muted">chưa có ảnh nào được chọn</p>';
+    box.innerHTML = '<p class="muted">no photo selected yet</p>';
     return;
   }
   const o = framingOpts();
@@ -916,9 +951,10 @@ function previewSoon() {
   S.prevTimer = setTimeout(renderPreview, 450);
 }
 
-// Tham so cua buoc dung. Nhip (pace/target_seconds) KHONG nam o day: no thuoc
-// buoc chon anh, vi so anh duoc chon theo dung bo so do. Doi nhip thi phai quay
-// lai buoc 3 va tinh lai, neu khong thi video dai khong nhu ngan sach.
+// Parameters of the render step. The pace (pace/target_seconds) is NOT here: it
+// belongs to the photo selection step, because the number of photos selected
+// follows exactly those figures. Changing the pace means going back to step 3
+// and recomputing, otherwise the video length will not match the budget.
 function renderOpts() {
   const story = $('r_mode').value === 'story';
   const by = Number($('r_birth_year').value);
@@ -945,9 +981,10 @@ function syncRenderMode() {
   $('flipRender').classList.toggle('hide', story);
 }
 
-// Vao buoc 4: kieu dung phai khop kieu da chon anh. Chon anh kieu 'even' thi
-// frame khong co chuong, dung kieu story se ra chuoi shot dai bang nhau khong
-// nhan — dung ky thuat nhung khong phai cai nguoi dung muon.
+// Entering step 4: the render mode has to match the mode the photos were picked
+// with. Picking with 'even' leaves the frames without chapters, so rendering in
+// story mode gives a string of equal-length shots with no labels — technically
+// correct, but not what the user wanted.
 function enterStep4() {
   if (S.filters && S.filters.mode) {
     $('r_mode').value = S.filters.mode === 'even' ? 'flip' : 'story';
@@ -958,8 +995,9 @@ function enterStep4() {
   loadStoryboard();
 }
 
-// Storyboard tinh o server bang dung thuat toan cua buoc dung, nen con so thoi
-// luong la con so that. Debounce vi moi lan goi phai doc lai frame tu db.
+// The storyboard is computed on the server with exactly the render step's own
+// algorithm, so the duration figure is the real one. Debounced because every
+// call has to re-read the frames from the db.
 function storyboardSoon() {
   clearTimeout(S.sbTimer);
   S.sbTimer = setTimeout(loadStoryboard, 350);
@@ -967,37 +1005,38 @@ function storyboardSoon() {
 
 async function loadStoryboard() {
   if (!S.projectId) return;
-  $('sbInfo').innerHTML = '<p class="muted">đang tính…</p>';
+  $('sbInfo').innerHTML = '<p class="muted">computing…</p>';
   try {
     const d = await api(`/projects/${S.projectId}/storyboard`, {
       method: 'POST', body: JSON.stringify({options: renderOpts()}),
     });
     S.sb = d;
     if (d.mode !== 'story') {
-      $('sbInfo').innerHTML = `<p class="muted">Rải đều: ${d.n_shots} ảnh ở `
-        + `${d.fps} ảnh/giây → ${d.duration_s}s.</p>`;
+      $('sbInfo').innerHTML = `<p class="muted">Even spread: ${d.n_shots} photos `
+        + `at ${d.fps} per second → ${d.duration_s}s.</p>`;
     } else {
       const mx = Math.max(1, ...d.chapters.map((c) => c.seconds));
       $('sbInfo').innerHTML = '<div class="cards small">'
-        + `<div class="card ok"><b>${d.duration_s}s</b><span>độ dài thật</span></div>`
-        + `<div class="card"><b>${d.n_shots}</b><span>shot</span></div>`
-        + (d.n_clip ? `<div class="card"><b>${d.n_clip}</b><span>đoạn video</span></div>` : '')
-        + `<div class="card"><b>${d.chapters.length}</b><span>chương</span></div>`
-        + `<div class="card"><b>${d.n_frames}</b><span>frame @${d.fps}fps</span></div>`
+        + `<div class="card ok"><b>${d.duration_s}s</b><span>real duration</span></div>`
+        + `<div class="card"><b>${d.n_shots}</b><span>shots</span></div>`
+        + (d.n_clip ? `<div class="card"><b>${d.n_clip}</b><span>video clips</span></div>` : '')
+        + `<div class="card"><b>${d.chapters.length}</b><span>chapters</span></div>`
+        + `<div class="card"><b>${d.n_frames}</b><span>frames @${d.fps}fps</span></div>`
         + '</div>'
         + (d.target_seconds
           && Math.abs(d.duration_s - d.target_seconds) > d.target_seconds * 0.35
-          ? `<div class="warn">Lệch khá xa ngân sách ${d.target_seconds}s. `
-            + 'Thường là do quá nhiều chương mà mỗi chương buộc phải có ít nhất '
-            + 'một ảnh. Quay lại bước 3, đặt "Một chương là" thô hơn hoặc tăng '
-            + 'độ dài mong muốn.</div>' : '')
-        + (d.n_missing ? `<div class="warn">${d.n_missing} ảnh không đọc được `
-          + 'file preview, đã bỏ khỏi câu chuyện.</div>' : '')
+          ? `<div class="warn">Well off the ${d.target_seconds}s budget. Usually `
+            + 'this means too many chapters, since every chapter is forced to have '
+            + 'at least one photo. Go back to the thresholds step and set "One '
+            + 'chapter covers" to something coarser, or raise the target '
+            + 'duration.</div>' : '')
+        + (d.n_missing ? `<div class="warn">${d.n_missing} photos had no readable `
+          + 'preview file and were dropped from the story.</div>' : '')
         + '<div class="chapbars">'
         + d.chapters.map((c) => '<div class="cb">'
           + `<span class="cbl">${c.label}</span>`
           + `<span class="cbb"><i style="width:${Math.round(100 * c.seconds / mx)}%"></i></span>`
-          + `<span class="cbn">${c.seconds}s<em>${c.n} ảnh</em></span></div>`).join('')
+          + `<span class="cbn">${c.seconds}s<em>${c.n} photos</em></span></div>`).join('')
         + '</div>';
     }
     estimate();
@@ -1009,13 +1048,13 @@ async function loadStoryboard() {
 function estimate() {
   const d = S.sb;
   if (d && d.n_shots) {
-    $('renderEst').textContent = `${d.n_shots} ảnh → video ${d.duration_s} giây`;
+    $('renderEst').textContent = `${d.n_shots} shots → a ${d.duration_s} second video`;
     return;
   }
   const n = S.result ? S.result.n_selected : 0;
   const fps = Number($('r_fps').value);
   $('renderEst').textContent = n
-    ? `${n} ảnh ở ${fps} ảnh/giây → video khoảng ${(n / fps).toFixed(1)} giây`
+    ? `${n} photos at ${fps} per second → roughly ${(n / fps).toFixed(1)} seconds`
     : '';
 }
 
@@ -1023,7 +1062,7 @@ async function startRender() {
   if (!S.projectId) return;
   $('render').disabled = true;
   $('reRender').disabled = true;
-  $('r_aspect').value = $('o_aspect').value;      // hai cho, mot gia tri
+  $('r_aspect').value = $('o_aspect').value;      // two places, one value
   step(5);
   try {
     const r = await api(`/projects/${S.projectId}/render`, {
@@ -1045,12 +1084,12 @@ function pollRender() {
   const tick = async () => {
     try {
       const r = await api('/renders/' + S.renderId);
-      const label = {queued: 'đang chờ', frames: 'đang dựng frame',
-        encoding: 'ffmpeg đang encode', audio: 'đang ghép tiếng',
-        done: 'xong', error: 'lỗi'}[r.status] || r.status;
+      const label = {queued: 'queued', frames: 'building frames',
+        encoding: 'ffmpeg encoding', audio: 'muxing audio',
+        done: 'done', error: 'error'}[r.status] || r.status;
       $('renderState').innerHTML = r.status === 'error'
-        ? `<div class="err">Lỗi: ${r.err}</div>`
-        : `<p><b>${label}</b> — ${r.n_done}/${r.n_total} frame</p>`
+        ? `<div class="err">Error: ${r.err}</div>`
+        : `<p><b>${label}</b> — ${r.n_done}/${r.n_total} frames</p>`
           + `<progress max="100" value="${r.pct}"></progress>`;
       if (r.status === 'done') {
         clearInterval(S.poll);
@@ -1061,15 +1100,15 @@ function pollRender() {
         $('player').src = url;
         $('player').classList.remove('hide');
         const st = r.story || {};
-        $('renderState').innerHTML = `<p><b>Xong</b> — `
-          + `${r.duration_s ? r.duration_s.toFixed(1) : '?'} giây`
-          + (st.n_shots ? ` · ${st.n_shots} ảnh` : '')
-          + (st.n_chapter ? ` · ${st.n_chapter} chương` : '')
-          + `. <a href="${url}" download>Tải mp4</a></p>`
-          + (st.n_missing ? `<div class="warn">${st.n_missing} ảnh không đọc `
-            + 'được file preview, đã bỏ qua.</div>' : '');
+        $('renderState').innerHTML = `<p><b>Done</b> — `
+          + `${r.duration_s ? r.duration_s.toFixed(1) : '?'} seconds`
+          + (st.n_shots ? ` · ${st.n_shots} shots` : '')
+          + (st.n_chapter ? ` · ${st.n_chapter} chapters` : '')
+          + `. <a href="${url}" download>Download mp4</a></p>`
+          + (st.n_missing ? `<div class="warn">${st.n_missing} photos had no `
+            + 'readable preview file and were skipped.</div>' : '');
         loadRenders();
-        toast('Video đã dựng xong');
+        toast('Video rendered');
       } else if (r.status === 'error') {
         clearInterval(S.poll);
         $('render').disabled = false;
@@ -1090,14 +1129,14 @@ async function loadRenders() {
   try {
     const d = await api(`/projects/${S.projectId}/renders`);
     $('renderList').innerHTML = d.renders.length
-      ? '<table><tr><th>#</th><th>Trạng thái</th><th>Frame</th><th>Dài</th><th></th></tr>'
+      ? '<table><tr><th>#</th><th>Status</th><th>Frames</th><th>Length</th><th></th></tr>'
         + d.renders.map((r) => `<tr><td>${r.id}</td><td>${r.status}</td>`
           + `<td>${r.n_done}/${r.n_total}</td>`
           + `<td>${r.duration_s ? r.duration_s.toFixed(1) + 's' : '—'}</td>`
           + `<td>${r.status === 'done'
-            ? `<a href="/api/renders/${r.id}/video${TOKEN ? '?token=' + TOKEN : ''}" download>tải</a>`
+            ? `<a href="/api/renders/${r.id}/video${TOKEN ? '?token=' + TOKEN : ''}" download>download</a>`
             : (r.err || '')}</td></tr>`).join('')
         + '</table>'
-      : '<p class="muted">Chưa có lần dựng nào.</p>';
-  } catch (e) { /* khong quan trong */ }
+      : '<p class="muted">No renders yet.</p>';
+  } catch (e) { /* not important */ }
 }

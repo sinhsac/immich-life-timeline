@@ -20,7 +20,7 @@ def create(subjects, name=None, date_from=None, date_to=None, filters=None,
     s = get()
     grps = SEL.groups_of(subjects)
     if not grps:
-        raise ValueError("chua chon cluster nao")
+        raise ValueError("no cluster was selected")
     flat = [p for p in dict.fromkeys(pid for g in grps for pid in g)]
     together = bool(together) and len(grps) > 1
 
@@ -28,9 +28,9 @@ def create(subjects, name=None, date_from=None, date_to=None, filters=None,
                       (filters or {}).get("use_clips", True))
     if not cands:
         raise ValueError(
-            "khong co anh nao du dieu kien"
-            + (" co mat du tat ca nhung nguoi da chon" if together else "")
-            + " (can state=1 va co landmark)")
+            "no eligible photo found"
+            + (" containing every selected person" if together else "")
+            + " (state=1 and landmarks are required)")
     f = SEL.merge(filters) if filters else SEL.suggest(cands)
     res = SEL.apply(cands, f)
     pname = _title(cands, grps)
@@ -77,7 +77,7 @@ def get_project(project_id):
         p = cur.fetchone()
         c.rollback()
     if not p:
-        raise KeyError(f"khong co project {project_id}")
+        raise KeyError(f"no project {project_id}")
     p["person_id"] = str(p["person_id"])
     # project cu (truoc khi co person_ids / subjects) van chay duoc
     p["person_ids"] = [str(x) for x in (p.get("person_ids") or [p["person_id"]])]
@@ -157,9 +157,11 @@ def set_excluded(project_id, asset_id, fidx, excluded=True):
             f" VALUES(%s,%s,%s,%s,%s)"
             f" ON CONFLICT(project_id,asset_id,fidx) DO UPDATE SET"
             f"   excluded=EXCLUDED.excluded,"
-            f"   reason=CASE WHEN EXCLUDED.excluded THEN 'bo tay' ELSE NULL END",
+            # Lay thang tu EXCLUDED de chuoi ly do chi ton tai o MOT cho
+            # (SEL.MANUAL_REASON) — truoc day no bi lap lai trong SQL.
+            f"   reason=EXCLUDED.reason",
             (project_id, asset_id, fidx, bool(excluded),
-             "bo tay" if excluded else None))
+             SEL.MANUAL_REASON if excluded else None))
         c.commit()
 
 
@@ -267,6 +269,7 @@ def _write_frames(cur, s, project_id, res, keep_excluded=False):
                 excluded, r.get("reason"))
 
     batch = [row(r, r.get("ord"), False) for r in res["selected"]]
-    batch += [row(r, None, r.get("reason") == "bo tay") for r in res["rejected"]]
+    batch += [row(r, None, r.get("reason") == SEL.MANUAL_REASON)
+              for r in res["rejected"]]
     if batch:
         cur.executemany(ins, batch)

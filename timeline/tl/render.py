@@ -205,13 +205,15 @@ def start(project_id, over=None):
     o = options(over, p.get("filters"))
     fr = projects.frames(project_id)
     if not fr:
-        raise ValueError("chua co frame nao duoc chon")
+        raise ValueError("no frame has been selected yet")
     if _running["id"] is not None:
-        raise RuntimeError(f"dang render #{_running['id']}, doi xong roi chay tiep")
+        raise RuntimeError(f"render #{_running['id']} is running, wait for it to "
+                           f"finish")
 
     fr, n_missing = preflight(fr, s)
     if len(fr) < 2:
-        raise ValueError(f"chi doc duoc {len(fr)} anh, can it nhat 2")
+        raise ValueError(f"only {len(fr)} photos could be read, at least 2 are "
+                         f"needed")
     if o["title"] and not o["title_text"]:
         o["title_text"] = p.get("person_name") or p.get("name") or ""
 
@@ -287,7 +289,7 @@ def status(render_id):
         r = cur.fetchone()
         c.rollback()
     if not r:
-        raise KeyError(f"khong co render {render_id}")
+        raise KeyError(f"no render {render_id}")
     for k in ("started_at", "finished_at"):
         if r.get(k) is not None:
             r[k] = r[k].isoformat()
@@ -403,7 +405,7 @@ def _story(rid, sb, o, s, out, work):
                 _set(rid, n_done=t)
         _set(rid, n_done=total)
     except BrokenPipeError as e:
-        raise RuntimeError("ffmpeg dut giua duong: " + _tail(log)) from e
+        raise RuntimeError("ffmpeg died mid-pipe: " + _tail(log)) from e
     finally:
         for sr in srcs.values():
             sr.close()
@@ -421,9 +423,9 @@ def _story(rid, sb, o, s, out, work):
         if fh:
             fh.close()
     if rc != 0:
-        raise RuntimeError(f"ffmpeg loi (ma {rc}): " + _tail(log))
+        raise RuntimeError(f"ffmpeg failed (exit {rc}): " + _tail(log))
     if not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("ffmpeg khong tao ra file")
+        raise RuntimeError("ffmpeg produced no file")
     if n_dead:
         print(f"[render {rid}] {n_dead}/{total} frame phai lap lai frame truoc "
               f"(khong doc duoc anh)")
@@ -700,7 +702,7 @@ def _card_lines(sh, o):
     if by and sh["taken_at"]:
         age = story.dt(sh["taken_at"]).year - by
         if 0 <= age <= 120:
-            lines.append((f"{age} tuổi", 0.68))
+            lines.append((f"age {age}", 0.68))
     return lines
 
 
@@ -929,7 +931,8 @@ def _flip(rid, fr, o, s, out, work):
                 _set(rid, n_done=n_ok)
     _set(rid, n_done=n_ok)
     if n_ok < 2:
-        raise RuntimeError(f"chi align duoc {n_ok} frame, khong du dung video")
+        raise RuntimeError(f"only {n_ok} frames could be aligned, not enough to "
+                           f"build a video")
 
     _set(rid, status="encoding")
     vf = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
@@ -948,9 +951,9 @@ def _flip(rid, fr, o, s, out, work):
     print("[render] " + " ".join(cmd))
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
-        raise RuntimeError("ffmpeg loi: " + (p.stderr or "")[-400:])
+        raise RuntimeError("ffmpeg failed: " + (p.stderr or "")[-400:])
     if not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("ffmpeg khong tao ra file")
+        raise RuntimeError("ffmpeg produced no file")
     return n_ok / float(o["fps"])
 
 
@@ -1008,4 +1011,4 @@ def ffmpeg_ok():
             return True, p.stdout.splitlines()[0]
         return False, (p.stderr or "")[:200]
     except FileNotFoundError:
-        return False, f"khong tim thay {s.ffmpeg} trong PATH"
+        return False, f"{s.ffmpeg} not found in PATH"

@@ -22,6 +22,10 @@ from .settings import get
 
 dt, ts, iso = story.dt, story.ts, story.iso
 
+# Ly do loai khi nguoi dung tu bo mot anh trong UI. Mot hang so vi UI dua vao
+# dung chuoi nay de biet anh nao co the lay lai duoc (app.js: MANUAL_REASON).
+MANUAL_REASON = "dropped by hand"
+
 # Nguong mac dinh, nham vao video hanh trinh mot nguoi tu be den lon.
 DEFAULTS = {
     # --- pose dau ---
@@ -285,55 +289,55 @@ def _reject(r, f):
     # va bi loai. None moi la "chua tinh duoc" va moi dang bi loai.
     yaw, pitch, roll = (_ang(r["yaw"]), _ang(r["pitch"]), _ang(r["roll"]))
     if yaw > f["max_yaw"]:
-        return f"quay dau {yaw:.0f}\u00b0 > {f['max_yaw']:.0f}\u00b0"
+        return f"head turned {yaw:.0f}\u00b0 > {f['max_yaw']:.0f}\u00b0"
     if pitch > f["max_pitch"]:
-        return f"ngua/cui {pitch:.0f}\u00b0 > {f['max_pitch']:.0f}\u00b0"
+        return f"tilted up/down {pitch:.0f}\u00b0 > {f['max_pitch']:.0f}\u00b0"
     if roll > f["max_roll"]:
-        return f"nghieng dau {roll:.0f}\u00b0 > {f['max_roll']:.0f}\u00b0"
+        return f"head tilted sideways {roll:.0f}\u00b0 > {f['max_roll']:.0f}\u00b0"
 
     fr = r["frontality"]
     if fr is not None and fr < f["min_frontality"]:
-        return f"khong du chinh dien {fr:.2f} < {f['min_frontality']:.2f}"
+        return f"not frontal enough {fr:.2f} < {f['min_frontality']:.2f}"
 
     ear = r["ear"]
     if ear is not None and f["min_ear"] > 0 and ear < f["min_ear"]:
-        return f"co ve nham mat (EAR {ear:.2f})"
+        return f"eyes look closed (EAR {ear:.2f})"
 
     er = r["eye_ratio"]
     if er is not None and er < f["min_eye_ratio"]:
-        return f"mat qua nho trong anh ({er * 100:.1f}%)"
+        return f"face too small in the photo ({er * 100:.1f}%)"
 
     sh = r["sharp"]
     if sh is not None and sh < f["min_sharp"]:
-        return f"mo (sharp {sh:.0f} < {f['min_sharp']:.0f})"
+        return f"blurry (sharpness {sh:.0f} < {f['min_sharp']:.0f})"
 
     br = r["bright"]
     if br is not None and not (f["bright_min"] <= br <= f["bright_max"]):
-        return f"sang/toi qua ({br:.0f})"
+        return f"too bright or too dark ({br:.0f})"
 
     q = r["quality"]
     if q is not None and f["min_quality"] > 0 and q < f["min_quality"]:
-        return f"diem chat luong thap ({q:.0f})"
+        return f"low quality score ({q:.0f})"
 
     n_face = r["n_face"] or 1
     if not f["allow_others"] and n_face > 1:
-        return f"anh co {n_face} nguoi"
+        return f"photo contains other people ({n_face} faces)"
     if f["max_faces"] and n_face > f["max_faces"]:
-        return f"anh co {n_face} nguoi > {f['max_faces']}"
+        return f"too many faces {n_face} > {f['max_faces']}"
 
     if f["use_body"]:
         has_body = r["posture"] is not None or r["orientation"] is not None
         if not has_body:
             if not f["allow_missing_body"]:
-                return "khong detect duoc than nguoi"
+                return "no body detected"
         else:
             if r["posture"] and r["posture"] not in f["postures"]:
-                return f"tu the {r['posture']}"
+                return f"posture {r['posture']}"
             if r["orientation"] and r["orientation"] not in f["orientations"]:
-                return f"huong than {r['orientation']}"
+                return f"torso orientation {r['orientation']}"
             bf = r["body_front"]
             if bf is not None and bf < f["min_body_front"]:
-                return f"than khong chinh dien ({bf:.2f})"
+                return f"torso not frontal ({bf:.2f})"
     return None
 
 
@@ -345,15 +349,15 @@ def _ang(v):
 def _reject_clip(r, f):
     """Nguong rieng cho doan video. Anh khong co nhung chi so nay."""
     if not f["use_clips"]:
-        return "dang tat doan video"
+        return "video clips are turned off"
     dur = float(r.get("dur_s") or 0.0)
     if dur < f["min_clip_seconds"]:
-        return f"doan qua ngan ({dur:.1f}s)"
+        return f"clip too short ({dur:.1f}s)"
     mo = r.get("motion")
     if mo is not None and mo > f["max_clip_motion"]:
-        return f"doan rung qua ({mo:.1f} khuon mat/giay)"
+        return f"clip too shaky ({mo:.1f} face widths/s)"
     if not r.get("video_path"):
-        return "khong co duong dan file video"
+        return "no video file path"
     return None
 
 
@@ -383,9 +387,9 @@ def apply(cands, filters, excluded=None):
     for r in cands:
         key = f"{r['asset_id']}:{r['fidx']}"
         if key in excluded:
-            r = dict(r, reason="bo tay", score=_score(r))
+            r = dict(r, reason=MANUAL_REASON, score=_score(r))
             rejected.append(r)
-            reasons["bo tay"] = reasons.get("bo tay", 0) + 1
+            reasons[MANUAL_REASON] = reasons.get(MANUAL_REASON, 0) + 1
             continue
         why = _reject(r, f)
         if why:
@@ -399,12 +403,13 @@ def apply(cands, filters, excluded=None):
     s = get()
     if f["mode"] == "story":
         kept, dropped, meta = story.build(passed, f, hard_cap=s.max_frames)
-        why, head = ("chuong nay da co anh dai dien tot hon",
-                     "khong duoc chon vao chuong")
+        why, head = ("this chapter already has a better photo",
+                     "not picked for its chapter")
     else:
         kept, dropped = _spread(passed, f)
         meta = None
-        why, head = ("da co anh tot hon trong cung giai doan", "trung giai doan")
+        why, head = ("a better photo exists in the same period",
+                     "same period as a better photo")
     for r in dropped:
         r["reason"] = why
     if dropped:
@@ -413,7 +418,7 @@ def apply(cands, filters, excluded=None):
 
     if len(kept) > s.max_frames:
         for r in kept[s.max_frames:]:
-            r["reason"] = f"vuot gioi han {s.max_frames} frame"
+            r["reason"] = f"over the {s.max_frames} frame limit"
         rejected.extend(kept[s.max_frames:])
         kept = kept[:s.max_frames]
 

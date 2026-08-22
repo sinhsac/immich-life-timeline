@@ -205,12 +205,12 @@ def similar(person_id, limit=24, min_sim=0.25, per_person=16, seeds=None):
     ids, mat = centroids(per_person)
     if not ids:
         return {"person_id": str(person_id), "n_cluster": 0, "similar": [],
-                "detail": "chua co embedding nao (can chay stage faces)"}
+                "detail": "no embeddings yet (run the faces stage first)"}
     index = {p: i for i, p in enumerate(ids)}
     chosen = [str(p) for p in (seeds or [str(person_id)]) if str(p) in index]
     if not chosen:
         return {"person_id": str(person_id), "n_cluster": len(ids), "similar": [],
-                "detail": "cluster nay khong co embedding"}
+                "detail": "this cluster has no embeddings"}
 
     q = mat[[index[p] for p in chosen]].mean(0)
     q /= max(float(np.linalg.norm(q)), 1e-9)

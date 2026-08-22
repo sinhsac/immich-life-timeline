@@ -1,269 +1,400 @@
+/* fp-timeline UI — light theme.
+   Design tokens first, then components in the order they appear on screen.
+   Class names are unchanged from the dark version: app.js targets many of them
+   directly, so restyling must not rename anything. */
 :root{
-  --bg:#14161a; --panel:#1c1f26; --line:#2b3038; --fg:#e6e8ec;
-  --muted:#8b93a1; --acc:#4c9aff; --ok:#3fb950; --bad:#f85149;
+  /* surfaces, from furthest back to closest */
+  --bg:#f4f6f8;          /* page */
+  --panel:#ffffff;       /* cards, sidebars, popovers */
+  --sunken:#f0f2f5;      /* inputs, track backgrounds, table headers */
+  --line:#dfe3e8;        /* hairlines */
+  --line-strong:#c6ccd4; /* borders that must read as an edge */
+
+  /* text */
+  --fg:#171a1f;
+  --fg-soft:#3d4450;
+  --muted:#6a7280;
+
+  /* accents. One blue for "the app is talking to you", green for kept,
+     red for dropped, amber for "this is fine but read it". */
+  --acc:#1f6feb;
+  --acc-soft:#eaf1fe;
+  --acc-line:#b6d0fb;
+  --ok:#1a7f4b;
+  --ok-soft:#e8f6ee;
+  --bad:#c62f2f;
+  --bad-soft:#fdeceb;
+  --warn:#8a5a00;
+  --warn-soft:#fdf5e3;
+  --warn-line:#f0d9a3;
+  --clip:#7b3fe4;        /* video clips: a third category, needs its own hue */
+
+  --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+  --shadow-md:0 4px 12px rgba(16,24,40,.08);
+  --shadow-lg:0 12px 32px rgba(16,24,40,.16);
+  --r:10px;
+  --r-sm:7px;
 }
+
 *{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--fg);
-  font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{padding:14px 20px;border-bottom:1px solid var(--line);
-  position:sticky;top:0;background:var(--bg);z-index:10}
-h1{margin:0 0 10px;font-size:17px;font-weight:600}
-h3{margin:18px 0 8px;font-size:13px;text-transform:uppercase;
-  letter-spacing:.06em;color:var(--muted)}
-main{padding:20px;max-width:1500px;margin:0 auto}
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+    "Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+
+/* Everything focusable gets the same ring. Cheaper than remembering to add it
+   per component, and keyboard users get a consistent target. */
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:4px}
+
+/* ---------------------------------------------------------------- header */
+header{padding:14px 24px 12px;background:var(--panel);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40;
+  box-shadow:var(--shadow-sm)}
+h1{margin:0 0 12px;font-size:16px;font-weight:650;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:9px}
+h1::before{content:"";width:5px;height:18px;border-radius:3px;
+  background:var(--acc);flex:none}
+h3{margin:22px 0 9px;font-size:11.5px;font-weight:650;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--muted)}
+main{padding:22px 24px 40px;max-width:1520px;margin:0 auto}
 .muted{color:var(--muted);font-size:12.5px}
 .hide{display:none !important}
+code{background:var(--sunken);border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;font-size:12px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+a{color:var(--acc)}
 
-nav{display:flex;gap:6px;flex-wrap:wrap}
-nav button{background:var(--panel);color:var(--muted);border:1px solid var(--line);
-  border-radius:6px;padding:7px 13px;cursor:pointer;font-size:13px}
-nav button.on{color:var(--fg);border-color:var(--acc)}
-nav button:disabled{opacity:.4;cursor:not-allowed}
+/* ------------------------------------------------------------------- nav */
+nav{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+nav button{background:transparent;color:var(--muted);border:1px solid transparent;
+  border-radius:var(--r-sm);padding:7px 13px;cursor:pointer;font-size:13px;
+  font-weight:550;transition:background .12s,color .12s,border-color .12s}
+nav button:hover:not(:disabled){background:var(--sunken);color:var(--fg-soft)}
+nav button.on{background:var(--acc-soft);color:var(--acc);
+  border-color:var(--acc-line)}
+nav button:disabled{opacity:.45;cursor:not-allowed}
+
+#health{margin-top:10px}
+#health:empty{margin-top:0}
 
 .step{display:none}
 .step.on{display:block}
 
+/* --------------------------------------------------------------- buttons */
 button{font:inherit}
-button.primary{background:var(--acc);color:#fff;border:0;border-radius:6px;
-  padding:9px 16px;cursor:pointer}
-button.primary:disabled{opacity:.5;cursor:wait}
+button.primary{background:var(--acc);color:#fff;border:1px solid var(--acc);
+  border-radius:var(--r-sm);padding:9px 17px;cursor:pointer;font-weight:600;
+  box-shadow:var(--shadow-sm);transition:background .12s,box-shadow .12s}
+button.primary:hover:not(:disabled){background:#1a5fd0;box-shadow:var(--shadow-md)}
+button.primary:disabled{opacity:.55;cursor:wait;box-shadow:none}
 .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
-.bar button:not(.primary){background:var(--panel);color:var(--fg);
-  border:1px solid var(--line);border-radius:6px;padding:8px 13px;cursor:pointer}
-input[type=number],select{background:var(--panel);color:var(--fg);
-  border:1px solid var(--line);border-radius:5px;padding:5px 8px;width:100%}
-input[type=number]{width:80px}
-input[type=range]{width:100%;margin:6px 0 0}
-aside label{display:block;margin:12px 0;font-size:12.5px;color:var(--muted)}
-aside label output{color:var(--fg);font-weight:600}
-label.chk{display:flex;gap:8px;align-items:center;color:var(--fg)}
+.bar button:not(.primary){background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);
+  padding:8px 14px;cursor:pointer;font-weight:550;box-shadow:var(--shadow-sm);
+  transition:background .12s,border-color .12s}
+.bar button:not(.primary):hover:not(:disabled){background:var(--sunken);
+  border-color:var(--muted)}
+.bar button:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------------------------------------------------------------- inputs */
+input[type=number],input[type=date],select{background:var(--panel);
+  color:var(--fg);border:1px solid var(--line-strong);border-radius:6px;
+  padding:6px 9px;width:100%;font:inherit;font-size:13px}
+input[type=number]:hover,input[type=date]:hover,select:hover{
+  border-color:var(--muted)}
+input[type=number]{width:86px}
+select{cursor:pointer}
+input[type=range]{width:100%;margin:7px 0 0;accent-color:var(--acc);
+  cursor:pointer}
+input[type=checkbox]{accent-color:var(--acc);cursor:pointer}
+aside label{display:block;margin:13px 0;font-size:12.5px;color:var(--muted)}
+aside label output{color:var(--fg);font-weight:650;
+  font-variant-numeric:tabular-nums}
+label.chk{display:flex;gap:8px;align-items:center;color:var(--fg-soft);
+  cursor:pointer}
 label.chk input{width:auto}
+aside p.muted{margin:6px 0 14px;line-height:1.5}
 
-.split{display:grid;grid-template-columns:300px 1fr;gap:26px;align-items:start}
-aside{background:var(--panel);border:1px solid var(--line);border-radius:9px;
-  padding:4px 16px 16px;position:sticky;top:96px;max-height:calc(100vh - 120px);
-  overflow:auto}
+/* --------------------------------------------------------------- layout */
+.split{display:grid;grid-template-columns:312px 1fr;gap:26px;align-items:start}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:6px 18px 18px;position:sticky;top:104px;
+  max-height:calc(100vh - 128px);overflow:auto;box-shadow:var(--shadow-sm)}
+aside h3:first-child{margin-top:16px}
 
+/* ----------------------------------------------------------------- cards */
 .cards{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:9px;
-  padding:12px 18px;min-width:130px}
-.card b{display:block;font-size:23px;line-height:1.2}
+.card{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:13px 18px;min-width:136px;
+  box-shadow:var(--shadow-sm)}
+.card b{display:block;font-size:23px;line-height:1.25;font-weight:680;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .card span{color:var(--muted);font-size:12px}
+.card.ok{background:var(--ok-soft);border-color:#bfe3cd}
 .card.ok b{color:var(--ok)}
-.cards.small .card{padding:9px 14px;min-width:105px}
+.card b.bad{color:var(--bad)}
+.cards.small .card{padding:10px 15px;min-width:108px}
 .cards.small .card b{font-size:18px}
 
-.grid{display:grid;gap:10px}
-.grid.people{grid-template-columns:repeat(auto-fill,minmax(132px,1fr))}
-.grid.frames{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+/* ------------------------------------------------------------ thumb grids */
+.grid{display:grid;gap:11px}
+.grid.people{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.grid.frames{grid-template-columns:repeat(auto-fill,minmax(108px,1fr))}
 
-.person{background:var(--panel);border:1px solid var(--line);border-radius:9px;
-  overflow:hidden;cursor:pointer;text-align:center}
-.person:hover{border-color:var(--acc)}
+.person{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);overflow:hidden;cursor:pointer;text-align:center;
+  box-shadow:var(--shadow-sm);transition:border-color .12s,box-shadow .12s,
+    transform .12s}
+.person:hover{border-color:var(--acc-line);box-shadow:var(--shadow-md);
+  transform:translateY(-1px)}
 .person img{width:100%;aspect-ratio:1;object-fit:cover;display:block;
-  background:#000}
-.person .nm{padding:6px 6px 2px;font-size:12.5px;font-weight:600;
+  background:var(--sunken)}
+.person .nm{padding:7px 7px 2px;font-size:12.5px;font-weight:600;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.person .mt{padding:0 6px 8px;color:var(--muted);font-size:11px}
+.person .mt{padding:0 7px 9px;color:var(--muted);font-size:11px}
 
-.frame{position:relative;border:2px solid transparent;border-radius:7px;
-  overflow:hidden;cursor:pointer;background:#000}
+/* Selecting several clusters: a tick badge plus the similarity score. */
+.person .tick{position:absolute;top:7px;left:7px;width:21px;height:21px;
+  border-radius:50%;border:1px solid var(--line-strong);
+  background:rgba(255,255,255,.92);color:transparent;font-size:12px;
+  line-height:20px;text-align:center;box-shadow:var(--shadow-sm)}
+.person.on{border-color:var(--acc);
+  box-shadow:0 0 0 2px var(--acc-line),var(--shadow-md)}
+.person.on .tick{background:var(--acc);border-color:var(--acc);color:#fff}
+/* Suggested clusters: a green edge so they never blend into the main list. */
+.person.sug{border-color:#bfe3cd}
+.person.sug.on{border-color:var(--ok);box-shadow:0 0 0 2px #bfe3cd,var(--shadow-md)}
+.person.sug.on .tick{background:var(--ok);border-color:var(--ok)}
+.person .sim{position:absolute;top:7px;right:7px;background:var(--ok-soft);
+  border:1px solid #bfe3cd;border-radius:5px;padding:1px 7px;font-size:11.5px;
+  font-weight:650;color:var(--ok);font-variant-numeric:tabular-nums}
+.person .sim.clash{color:var(--warn);background:var(--warn-soft);
+  border-color:var(--warn-line)}
+.person .clashw{padding:0 8px 8px;font-size:11px;color:var(--warn);
+  font-weight:550}
+#simBox{border-top:1px solid var(--line);margin-top:24px;padding-top:6px}
+#simBox .bar h3{margin:0;flex:1}
+
+/* Frame tiles. The border carries the state, so it has to be readable on a
+   light page: kept = green, dropped = grey and dimmed, hero = blue,
+   clip = purple. */
+.frame{position:relative;border:2px solid var(--line);border-radius:var(--r-sm);
+  overflow:hidden;cursor:pointer;background:var(--sunken);
+  transition:transform .12s,box-shadow .12s}
+.frame:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
 .frame img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
 .frame .dt{position:absolute;left:0;right:0;bottom:0;
-  background:linear-gradient(transparent,rgba(0,0,0,.85));
-  color:#fff;font-size:10.5px;padding:9px 4px 3px;text-align:center}
+  background:linear-gradient(transparent,rgba(0,0,0,.78));color:#fff;
+  font-size:10.5px;font-weight:550;padding:11px 4px 3px;text-align:center;
+  font-variant-numeric:tabular-nums}
 .frame.sel{border-color:var(--ok)}
-.frame.rej{border-color:#3a3f48;opacity:.72}
-.frame.rej:hover{opacity:1}
-.frame .why{position:absolute;top:0;left:0;right:0;background:rgba(248,81,73,.9);
-  color:#fff;font-size:10px;padding:2px 3px;line-height:1.25}
+.frame.rej{border-color:var(--line-strong);opacity:.62;filter:saturate(.55)}
+.frame.rej:hover{opacity:1;filter:none}
+.frame .why{position:absolute;top:0;left:0;right:0;
+  background:rgba(198,47,47,.92);color:#fff;font-size:10px;padding:2px 4px;
+  line-height:1.3}
+.frame.hero{border-color:var(--acc)}
+.frame .heroTag{position:absolute;top:0;left:0;background:var(--acc);color:#fff;
+  font-size:9.5px;font-weight:650;padding:2px 6px;border-radius:0 0 6px 0;
+  letter-spacing:.02em}
+.frame.clip{border-color:var(--clip)}
+.frame .clipTag{position:absolute;top:0;left:0;background:var(--clip);
+  color:#fff;font-size:9.5px;font-weight:650;padding:2px 6px;
+  border-radius:0 0 6px 0;font-variant-numeric:tabular-nums}
 
-.chart{display:flex;gap:3px;align-items:flex-end;height:130px;
-  background:var(--panel);border:1px solid var(--line);border-radius:9px;
-  padding:12px}
+/* ----------------------------------------------------------------- chart */
+.chart{display:flex;gap:4px;align-items:flex-end;height:138px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:22px 14px 12px;box-shadow:var(--shadow-sm)}
 .chart div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;
-  position:relative;min-height:2px}
-.chart div span{position:absolute;bottom:-17px;left:50%;
+  position:relative;min-height:2px;opacity:.85}
+.chart div:hover{opacity:1}
+.chart div span{position:absolute;bottom:-18px;left:50%;
   transform:translateX(-50%) rotate(-45deg);font-size:10px;color:var(--muted)}
 .chart div b{position:absolute;top:-16px;left:50%;transform:translateX(-50%);
-  font-size:10px;color:var(--fg);font-weight:500}
+  font-size:10px;color:var(--fg-soft);font-weight:600;
+  font-variant-numeric:tabular-nums}
 
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
-.chips button{background:transparent;color:var(--muted);
-  border:1px solid var(--line);border-radius:14px;padding:4px 11px;
-  cursor:pointer;font-size:12px}
+/* ----------------------------------------------------------- chips, tabs */
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0}
+.chips button{background:var(--panel);color:var(--muted);
+  border:1px solid var(--line-strong);border-radius:15px;padding:4px 12px;
+  cursor:pointer;font-size:12px;font-weight:550;transition:background .12s}
+.chips button:hover{background:var(--sunken)}
 .chips button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 
-.tabs{display:flex;gap:6px;margin:18px 0 4px}
+.tabs{display:flex;gap:0;margin:20px 0 6px;border-bottom:1px solid var(--line)}
 .tabs button{background:transparent;color:var(--muted);border:0;
-  border-bottom:2px solid transparent;padding:7px 3px;margin-right:14px;
-  cursor:pointer}
-.tabs button.on{color:var(--fg);border-color:var(--acc)}
+  border-bottom:2px solid transparent;padding:9px 2px;margin-right:20px;
+  margin-bottom:-1px;cursor:pointer;font-weight:600;font-size:13px}
+.tabs button:hover{color:var(--fg-soft)}
+.tabs button.on{color:var(--acc);border-color:var(--acc)}
 
-table{border-collapse:collapse;width:100%;font-size:12.5px}
-td,th{padding:5px 9px;border-bottom:1px solid var(--line);text-align:left}
-th{color:var(--muted);font-weight:500}
+/* ---------------------------------------------------------------- tables */
+table{border-collapse:collapse;width:100%;font-size:12.5px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;box-shadow:var(--shadow-sm)}
+td,th{padding:7px 11px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:600;background:var(--sunken);
+  font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+tr:last-child td{border-bottom:0}
+td{font-variant-numeric:tabular-nums}
+.bad{color:var(--bad)}
 
-video{width:100%;max-width:720px;border-radius:9px;background:#000;margin:14px 0}
-progress{width:100%;height:9px;margin:8px 0}
+/* ------------------------------------------------------- video, progress */
+video{width:100%;max-width:760px;border-radius:var(--r);background:#0b0d10;
+  margin:14px 0;box-shadow:var(--shadow-md);display:block}
+progress{width:100%;max-width:760px;height:10px;margin:8px 0;
+  accent-color:var(--acc)}
 
-.warn{background:#3a2a12;border:1px solid #6b4a15;color:#f0c674;
-  border-radius:7px;padding:9px 13px;margin:12px 0;font-size:12.5px}
-.err{background:#3a1614;border:1px solid #7a2a25;color:#ffb4ae;
-  border-radius:7px;padding:9px 13px;margin:12px 0;font-size:12.5px}
+/* ------------------------------------------------------------- callouts */
+.warn,.err{border-radius:var(--r-sm);padding:10px 14px;margin:12px 0;
+  font-size:12.5px;line-height:1.5}
+.warn{background:var(--warn-soft);border:1px solid var(--warn-line);
+  color:var(--warn)}
+.err{background:var(--bad-soft);border:1px solid #f3c4c1;color:var(--bad)}
+.warn code,.err code{background:rgba(255,255,255,.6)}
 
-/* chon nhieu cluster: dau tich + % giong nhau */
-.person{position:relative}
-.person .tick{position:absolute;top:6px;left:6px;width:20px;height:20px;
-  border-radius:50%;border:1px solid var(--line);background:rgba(0,0,0,.55);
-  color:transparent;font-size:12px;line-height:19px;text-align:center}
-.person.on{outline:2px solid var(--acc);outline-offset:-2px}
-/* cum moi duoc goi y: vien xanh nhat de phan biet voi danh sach chinh */
-.person.sug{box-shadow:0 0 0 1px var(--ok) inset}
-.person.sug.on{outline-color:var(--ok)}
-.person.sug.on .tick{background:var(--ok);border-color:var(--ok)}
-#simBox .bar h3{margin:0;flex:1}
-.person.on .tick{background:var(--acc);border-color:var(--acc);color:#fff}
-.person .sim{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.66);
-  border:1px solid var(--line);border-radius:5px;padding:1px 6px;
-  font-size:11.5px;color:var(--ok);font-variant-numeric:tabular-nums}
-.person .sim.clash{color:#f0c674;border-color:#6b4a15}
-.person .clashw{padding:0 8px 7px;font-size:11px;color:#f0c674}
-
-/* thanh chon o duoi, chi hien khi da chon it nhat mot cum */
-.pickbar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;
-  display:flex;gap:14px;align-items:center;flex-wrap:wrap;z-index:90;
-  background:var(--panel);border:1px solid var(--line);border-radius:11px;
-  padding:11px 16px;box-shadow:0 8px 26px rgba(0,0,0,.5);max-width:94vw}
-.pickbar .pi{min-width:150px;max-width:320px}
+/* ------------------------------------------------------- selection bar --
+   Fixed to the bottom of the viewport, so it must live INSIDE section #s1:
+   outside it, .step{display:none} cannot hide it and it floats over every
+   other step. */
+.pickbar{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;
+  z-index:90;background:var(--panel);border:1px solid var(--line-strong);
+  border-radius:13px;padding:12px 18px;box-shadow:var(--shadow-lg);
+  max-width:min(96vw,1180px);
+  display:flex;flex-direction:column;align-items:stretch;gap:0}
+.pickbar .pi{min-width:158px;max-width:330px}
+.pickbar #pickInfo{font-size:13px}
 .pickbar #pickNames{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pickbar label{display:flex;flex-direction:column;font-size:12px;min-width:130px}
-.pickbar button{background:var(--bg);color:var(--fg);border:1px solid var(--line);
-  border-radius:6px;padding:8px 13px;cursor:pointer}
-.pickbar button.primary{background:var(--acc);color:#fff;border:0}
-#simBox{border-top:1px solid var(--line);margin-top:22px;padding-top:4px}
+.pickbar label{display:flex;flex-direction:column;font-size:12px;min-width:132px;
+  color:var(--muted);gap:2px}
+.pickbar button{background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);
+  padding:8px 14px;cursor:pointer;font-weight:550}
+.pickbar button:hover:not(:disabled){background:var(--sunken)}
+.pickbar button:disabled{opacity:.5;cursor:not-allowed}
+.pickbar button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+.pickbar button.primary:hover:not(:disabled){background:#1a5fd0}
+.subjrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+.pbmain{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.subjrow label.chk,.pbmain label.chk{flex-direction:row;align-items:center;
+  gap:7px;min-width:0;color:var(--muted)}
+#subjChips{display:inline-flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--acc);color:#fff;border:1px solid var(--acc);
+  border-radius:15px;padding:4px 12px;font-size:12.5px;cursor:pointer;
+  font-weight:550}
+.chip em{font-style:normal;opacity:.8;margin:0 4px}
+.chip:hover{background:#1a5fd0}
 
-/* xem truoc khung video: 3 frame cach xa nhau ve thoi gian */
-.fprev{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+/* ------------------------------------------------------- frame preview */
+.fprev{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
   gap:12px;margin:10px 0 18px}
 .fprev figure{margin:0;background:var(--panel);border:1px solid var(--line);
-  border-radius:9px;overflow:hidden}
-.fprev img{display:block;width:100%;height:auto;background:#000}
-.fprev figcaption{padding:6px 9px;color:var(--muted);font-size:12px;
+  border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow-sm)}
+.fprev img{display:block;width:100%;height:auto;background:var(--sunken)}
+.fprev figcaption{padding:7px 10px;color:var(--muted);font-size:12px;
   font-variant-numeric:tabular-nums}
 
-/* muc nav sang trang thong ke: day sang phai, luon bam duoc */
+/* --------------------------------------------------------- stats page --
+   A page of its own, not part of the step flow. */
 #steps button.aside{margin-left:auto}
 #steps button.aside.warnDot::after{content:"";display:inline-block;width:6px;
-  height:6px;border-radius:50%;background:var(--ok);margin-left:6px;
+  height:6px;border-radius:50%;background:var(--ok);margin-left:7px;
   vertical-align:middle}
-
-/* bang lich su cac lan chay stage */
-table.runs{width:100%;border-collapse:collapse;font-size:12.5px}
-table.runs th{text-align:left;color:var(--muted);font-weight:500;
-  border-bottom:1px solid var(--line);padding:6px 10px 6px 0}
-table.runs td{padding:5px 10px 5px 0;border-bottom:1px solid var(--line);
-  font-variant-numeric:tabular-nums}
 #idxBars{margin:14px 0 6px}
 
-.prow{display:grid;grid-template-columns:190px 1fr 150px;gap:12px;
-  align-items:center;margin:5px 0}
-.plab{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pbar{background:var(--panel);border:1px solid var(--line);border-radius:5px;
-  height:9px;overflow:hidden}
-.pbar i{display:block;height:100%;background:var(--acc);border-radius:4px;
+table.runs{width:100%;border-collapse:collapse;font-size:12.5px}
+table.runs th{text-align:left}
+table.runs td{font-variant-numeric:tabular-nums}
+
+.prow{display:grid;grid-template-columns:210px 1fr 158px;gap:14px;
+  align-items:center;margin:7px 0}
+.plab{color:var(--fg-soft);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;font-size:12.5px}
+.plab b{color:var(--acc);font-weight:600}
+.pbar{background:var(--sunken);border:1px solid var(--line);border-radius:6px;
+  height:10px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--acc);border-radius:5px;
   transition:width .4s ease}
 .prow.run .pbar i{background:linear-gradient(90deg,var(--acc),var(--ok))}
-.pnum{text-align:right;color:var(--fg);font-variant-numeric:tabular-nums}
-.pnum em{display:block;color:var(--muted);font-style:normal;font-size:11.5px}
-@media(max-width:900px){.prow{grid-template-columns:1fr 90px}.pbar{grid-column:1/-1}}
+.pnum{text-align:right;color:var(--fg);font-variant-numeric:tabular-nums;
+  font-weight:600;font-size:12.5px}
+.pnum em{display:block;color:var(--muted);font-style:normal;font-size:11.5px;
+  font-weight:400}
+@media(max-width:900px){.prow{grid-template-columns:1fr 96px}
+  .pbar{grid-column:1/-1}}
 
-#toast{position:fixed;right:18px;bottom:18px;display:flex;
-  flex-direction:column;gap:8px;z-index:100}
+/* ----------------------------------------------------------------- toast */
+#toast{position:fixed;right:20px;bottom:20px;display:flex;
+  flex-direction:column;gap:9px;z-index:100}
 #toast div{background:var(--panel);border:1px solid var(--line);
-  border-left:3px solid var(--acc);border-radius:6px;padding:10px 15px;
-  font-size:13px;max-width:380px}
-#toast div.bad{border-left-color:var(--bad)}
+  border-left:3px solid var(--acc);border-radius:var(--r-sm);padding:11px 16px;
+  font-size:13px;max-width:390px;box-shadow:var(--shadow-lg);color:var(--fg-soft)}
+#toast div.bad{border-left-color:var(--bad);color:var(--bad)}
 
-@media(max-width:900px){.split{grid-template-columns:1fr}aside{position:static;max-height:none}}
+@media(max-width:900px){
+  main{padding:18px 14px 34px}
+  header{padding:12px 14px 10px}
+  .split{grid-template-columns:1fr}
+  aside{position:static;max-height:none}
+}
 
-/* ---------------------------------------------------- che do ke chuyen ---
-   Anh vao video khong con la mot luoi phang: nhom theo CHUONG, va anh diem
-   nhan cua tung chuong duoc danh dau vi no chiem thoi luong gap doi tren video.
-*/
+/* ------------------------------------------------------ storytelling ---
+   Kept photos are not a flat grid: they are grouped by CHAPTER, and each
+   chapter's hero shot is marked because it takes roughly twice the screen
+   time of the others. */
 .chapters{display:block}
-.chapHead{margin:16px 0 7px;padding-bottom:5px;border-bottom:1px solid var(--line);
-  display:flex;align-items:baseline;gap:8px}
-.chapHead b{font-size:14px;letter-spacing:.02em}
-.chapHead:first-child{margin-top:2px}
+.chapHead{margin:20px 0 9px;padding-bottom:6px;
+  border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:9px}
+.chapHead b{font-size:14px;font-weight:650;letter-spacing:-.01em}
+.chapHead:first-child{margin-top:4px}
 
-.frame.hero{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
-.frame .heroTag{position:absolute;top:0;left:0;background:var(--acc);color:#fff;
-  font-size:9.5px;padding:1.5px 5px;border-radius:0 0 6px 0;letter-spacing:.02em}
-
-/* Thanh phan bo theo chuong. Dung lai hinh thuc cua .prow o trang thong ke de
-   khong sinh them mot ngon ngu thi giac thu hai trong cung mot app. */
-.chapbars{margin:12px 0 4px}
-.cb{display:grid;grid-template-columns:150px 1fr 92px;gap:11px;align-items:center;
-  margin:4px 0}
-.cbl{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;
+/* Chapter distribution bars. Deliberately the same shape as .prow on the
+   stats page: one visual language per app, not two. */
+.chapbars{margin:13px 0 4px}
+.cb{display:grid;grid-template-columns:158px 1fr 96px;gap:12px;
+  align-items:center;margin:5px 0}
+.cbl{color:var(--fg-soft);font-size:12.5px;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
-.cbb{background:var(--panel);border:1px solid var(--line);border-radius:5px;
-  height:9px;overflow:hidden}
-.cbb i{display:block;height:100%;background:var(--acc);border-radius:4px;
+.cbb{background:var(--sunken);border:1px solid var(--line);border-radius:6px;
+  height:10px;overflow:hidden}
+.cbb i{display:block;height:100%;background:var(--acc);border-radius:5px;
   transition:width .3s ease}
-.cbn{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px}
-.cbn em{color:var(--muted);font-style:normal;font-size:11px;margin-left:4px}
-@media(max-width:900px){.cb{grid-template-columns:1fr 78px}.cbb{grid-column:1/-1}}
+.cbn{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px;
+  font-weight:600}
+.cbn em{color:var(--muted);font-style:normal;font-size:11px;margin-left:4px;
+  font-weight:400}
+@media(max-width:900px){.cb{grid-template-columns:1fr 82px}
+  .cbb{grid-column:1/-1}}
 
-/* ------------------------------------------------- che do chuyen gia ---
-   Duong mac dinh: chon nguoi -> co video. Khong mot thanh truot nao. Moi thu
-   phuc tap deu mang class .adv va chi hien khi body.expert.
-   Lam bang CSS chu khong phai hai UI rieng: mot cay DOM, khong the lech nhau.
-*/
+/* --------------------------------------------------------- expert mode ---
+   Default path: pick a person, get a video. Not one slider in sight.
+   Everything complex carries .adv and only appears under body.expert.
+   Done in CSS rather than as two separate UIs: one DOM tree, so the two can
+   never drift apart. */
 .adv{display:none !important}
 body.expert .adv{display:revert !important}
 body.expert button.adv,
 body.expert label.adv{display:inline-flex !important}
 body.expert .bar button.adv{display:inline-block !important}
 
-.expertToggle{margin-left:auto;display:inline-flex;align-items:center;gap:6px;
-  color:var(--muted);font-size:12.5px;white-space:nowrap;cursor:pointer}
-.expertToggle input{accent-color:var(--acc)}
+.expertToggle{margin-left:14px;display:inline-flex;align-items:center;gap:7px;
+  color:var(--muted);font-size:12.5px;white-space:nowrap;cursor:pointer;
+  padding:6px 11px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--panel)}
+.expertToggle:hover{background:var(--sunken);color:var(--fg-soft)}
 
-/* Thanh truot bi vo hieu (do dai dang tu suy) — van thay de biet no ton tai */
-label.off{opacity:.4;pointer-events:none}
+/* A slider disabled because the value is being inferred — still visible, so
+   you know it exists. */
+label.off{opacity:.45;pointer-events:none}
 
-/* ------------------------------------------------ nhieu nguoi trong video ---
-   "Video cua ong A voi ba B": moi nguoi la mot NHOM cum rieng, khong suy ra
-   duoc tu mot mo cum lan lon nen phai chot tung nguoi mot.
-*/
-.subjrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--line)}
-.pbmain{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
-#subjChips{display:inline-flex;gap:6px;flex-wrap:wrap}
-.chip{background:var(--acc);color:#fff;border:0;border-radius:14px;
-  padding:4px 11px;font-size:12.5px;cursor:pointer}
-.chip em{font-style:normal;opacity:.75;margin:0 4px}
-.chip:hover{filter:brightness(1.15)}
-
-/* pickbar gio co hai hang (danh sach nguoi + cac nut) nen phai xep doc */
-.pickbar{flex-direction:column;align-items:stretch;gap:0}
-.subjrow label.chk,.pbmain label.chk{flex-direction:row;align-items:center;
-  gap:6px;min-width:0}
-
-/* trang ket qua */
-#outHead h3{margin:0 0 2px}
-#s5 video{max-width:900px}
+/* ---------------------------------------------------------- result page */
+#outHead{margin-bottom:4px}
+#outHead h3{margin:0 0 3px;font-size:19px;font-weight:680;text-transform:none;
+  letter-spacing:-.01em;color:var(--fg)}
+#s5 video{max-width:920px}
 #outBar{align-items:center}
-
-/* ---------------------------------------------------------- doan video ---
-   Mot shot co the la anh tinh hoac mot DOAN VIDEO. Phai phan biet duoc bang mat
-   ngay tren luoi, vi doan video chiem thoi luong khac han va nguoi dung can biet
-   cai gi dang chiem 3 giay trong video 40 giay cua minh.
-*/
-.frame.clip{border-color:#b06cf0}
-.frame .clipTag{position:absolute;top:0;left:0;background:#b06cf0;color:#fff;
-  font-size:9.5px;padding:1.5px 5px;border-radius:0 0 6px 0;
-  font-variant-numeric:tabular-nums}
-.frame.clip.hero{box-shadow:0 0 0 1px #b06cf0 inset}
+#renderState p{margin:8px 0}

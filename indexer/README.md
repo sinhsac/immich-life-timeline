@@ -1,114 +1,123 @@
-# fp-indexer — index head pose + body pose của ảnh Immich vào Postgres
+# fp-indexer — index head pose + body pose of Immich photos into Postgres
 
-Job độc lập, chạy một lệnh, ghi vào **bảng riêng có prefix** trong chính database
-của Immich. Bảng của Immich chỉ đọc, không bao giờ bị ghi.
+A standalone job, run with a single command, that writes to **its own
+prefixed tables** inside Immich's own database. Immich's tables are read-only here
+and are never written to.
 
-Khác với `../pipeline` (SQLite, chạy tay trên máy dev), folder này thiết kế để
-deploy như Job/CronJob trên k3s cùng node với Immich.
+Unlike `../pipeline` (SQLite, run by hand on a dev box), this folder is designed to
+be deployed as a Job/CronJob on k3s, on the same node as Immich.
 
-## Làm gì
+## What it does
 
-| Stage | Việc | Model | Ghi vào |
+| Stage | Work | Model | Writes to |
 |---|---|---|---|
-| 1 `assets` | Đọc danh sách ảnh **và video** + ngày chụp + đường dẫn | — | `fp_asset` |
-| 2 `faces` | Copy bbox + embedding + person đã gán | — | `fp_face` |
-| 3 `landmarks` | 68 điểm 3D → yaw/pitch/roll, EAR, age, chỉ số chất lượng | `buffalo_l` / 1k3d68 + genderage | `fp_face` |
-| 4 `bodies` | Detect người + 17 keypoint COCO → tư thế, hướng, góc thân | `yolov8n-pose.onnx` | `fp_body` |
-| 5 `clips` | Quét frame video, tìm người, cắt ra đoạn đẹp nhất | `det_10g` + `w600k_r50` | `fp_vface`, `fp_vclip` |
+| 1 `assets` | Read the list of photos **and videos** + capture date + paths | — | `fp_asset` |
+| 2 `faces` | Copy bbox + embedding + already-assigned person | — | `fp_face` |
+| 3 `landmarks` | 68 3D points → yaw/pitch/roll, EAR, age, quality metrics | `buffalo_l` / 1k3d68 + genderage | `fp_face` |
+| 4 `bodies` | Detect people + 17 COCO keypoints → posture, orientation, torso angle | `yolov8n-pose.onnx` | `fp_body` |
+| 5 `clips` | Scan video frames, find people, cut out the best clip | `det_10g` + `w600k_r50` | `fp_vface`, `fp_vclip` |
 
-Với **ảnh**, stage 2 lấy sẵn bbox + embedding từ Immich nên bỏ được SCRFD và
-ArcFace — hai model tốn nhất.
+For **photos**, stage 2 gets bbox + embedding straight from Immich, which lets us
+skip SCRFD and ArcFace — the two most expensive models.
 
-Với **video** thì không bỏ được, và đây là ngoại lệ duy nhất của nguyên tắc
-"không làm lại việc Immich đã làm". Lý do cụ thể: Immich chỉ chạy face detection
-cho video trên **đúng một frame thumbnail**. Biết một clip có ông A là đủ để liệt
-kê, nhưng không đủ để cắt ra "đoạn đẹp nhất có ông A" — muốn biết ông A xuất hiện
-ở giây thứ bao nhiêu, mặt to nhỏ ra sao, có nhìn vào máy không, thì phải tự quét.
+For **video** we can't skip them, and this is the only exception to the "never redo
+work Immich already did" principle. The concrete reason: Immich only runs face
+detection on video for **exactly one thumbnail frame**. Knowing that a clip contains
+person A is enough to list it, but not enough to cut out "the best clip featuring
+person A" — to know which second person A appears at, how large the face is, whether
+they're looking at the camera, you have to scan the video yourself.
 
-Điểm nhẹ nhõm: **hai model đó đã nằm sẵn trên đĩa.**
-`fetch_models.py --face` tải cả bộ `buffalo_l` gồm `1k3d68`, `genderage`,
-`det_10g` *và* `w600k_r50` — hai file cuối từ trước giờ tải về rồi không dùng.
-Không phải tải thêm gì, không phải đổi Dockerfile.
+The reassuring part: **both models are already on disk.**
+`fetch_models.py --face` downloads the whole `buffalo_l` bundle, which contains
+`1k3d68`, `genderage`, `det_10g` *and* `w600k_r50` — the last two have always been
+downloaded and never used. Nothing extra to fetch, no Dockerfile change.
 
-Cùng model recognition với Immich (`w600k_r50` của `buffalo_l`) và cùng template
-5 điểm, nên vector sinh ra ở stage 5 so sánh trực tiếp được với `emb` đã copy từ
-Immich trong `fp_face`. Đó là cơ sở để gán `person_id` cho mặt trong video.
+It's the same recognition model Immich uses (`w600k_r50` from `buffalo_l`) with the
+same 5-point template, so the vectors produced in stage 5 are directly comparable to
+the `emb` values copied from Immich into `fp_face`. That's what makes it possible to
+assign a `person_id` to faces found in video.
 
-## Stage 5: cắt đoạn video ra sao
+## Stage 5: how video clips get cut
 
-Ba bước, và thứ tự quan trọng:
+Three steps, and the order matters:
 
-**1. Quét frame.** Lấy mẫu `VIDEO_FPS` frame mỗi giây (mặc định 2; đặt 0 để lấy
-*tất cả* frame). Frame bị bỏ qua được đọc bằng `grab()` chứ không `retrieve()` —
-`grab` chỉ giải mã tối thiểu để nhảy tiếp, không dựng ra ảnh BGR. Đó là khác biệt
-giữa "quét 2 frame mỗi giây" tốn bằng 1/15 và tốn bằng 1 của "decode hết rồi bỏ".
-Không dùng seek để nhảy: với codec có B-frame, seek phải decode lại từ keyframe
-gần nhất nên đọc tuần tự còn nhanh hơn.
+**1. Scan frames.** Sample `VIDEO_FPS` frames per second (default 2; set 0 to take
+*every* frame). Skipped frames are consumed with `grab()` rather than `retrieve()` —
+`grab` decodes only the minimum needed to advance, without building a BGR image.
+That's the difference between "scan 2 frames per second" costing 1/15 versus "decode
+everything and throw most of it away" costing 1. No seeking to jump ahead: with
+B-frame codecs, a seek has to re-decode from the nearest keyframe, so reading
+sequentially is actually faster.
 
-**2. Gán người.** Mỗi mặt detect được đem so cosine với vector trung tâm của từng
-person (tính từ `fp_face.emb`). Hai điều kiện, không phải một: `sim ≥ VIDEO_SIM`
-**và** cách person xếp thứ hai ít nhất `VIDEO_MARGIN`. Người thân có nét giống
-nhau đạt 0,43–0,45 trên thư viện thật, nên một ngưỡng tuyệt đối là gán bừa.
+**2. Assign people.** Every detected face is compared by cosine similarity against
+each person's centroid vector (computed from `fp_face.emb`). Two conditions, not
+one: `sim ≥ VIDEO_SIM` **and** at least `VIDEO_MARGIN` ahead of the runner-up
+person. Relatives who look alike hit 0.43–0.45 on a real library, so a single
+absolute threshold amounts to guessing.
 
-Head pose ở đây **không** dùng `1k3d68` — suy từ 5 điểm (`pose_from_kps5`): góc
-đường nối hai mắt cho `roll` chính xác, mũi lệch khỏi trung điểm hai mắt cho `yaw`,
-mũi nằm ở đâu giữa đường mắt và đường miệng cho `pitch`. Hai giá trị sau là ước
-lượng, đủ để lọc và xếp hạng, không dùng để đo. Chạy thêm một model nữa cho từng
-mặt của từng frame là nhân đôi chi phí của stage đắt nhất.
+Head pose here does **not** use `1k3d68` — it's derived from the 5 points
+(`pose_from_kps5`): the angle of the line between the eyes gives an accurate `roll`,
+the nose offset from the midpoint of the eyes gives `yaw`, and where the nose sits
+between the eye line and the mouth line gives `pitch`. Those last two are estimates,
+good enough to filter and rank, not to measure. Running yet another model on every
+face of every frame would double the cost of the most expensive stage.
 
-**3. Trượt cửa sổ.** Gom frame thành các đoạn liên tục (cho phép mặt hụt trong
-`VIDEO_GAP_MS`), rồi trong từng đoạn thử mọi cửa sổ dài `CLIP_MIN_SECONDS` đến
-`CLIP_MAX_SECONDS` và chấm điểm:
+**3. Slide a window.** Group frames into continuous runs (allowing the face to drop
+out for up to `VIDEO_GAP_MS`), then within each run try every window from
+`CLIP_MIN_SECONDS` to `CLIP_MAX_SECONDS` long and score it:
 
 ```
-điểm = trung bình điểm từng frame × độ đầy frame × độ gần CLIP_SECONDS
-       ÷ (1 + 0,8 × độ rung)
+score = mean per-frame score × frame coverage × closeness to CLIP_SECONDS
+        ÷ (1 + 0.8 × jitter)
 ```
 
-Độ rung là thứ mà chấm điểm từng frame không bắt được: sáu frame đều nét và đều
-chính diện nhưng khuôn mặt nhảy khắp khung thì đoạn đó không xem được. Đo bằng
-"khuôn mặt dịch chuyển bao nhiêu *chiều rộng mặt* mỗi giây" — chia cho kích thước
-mặt chứ không cho kích thước khung, vì mặt to đi 50px là bình thường còn mặt nhỏ
-đi 50px là giật.
+Jitter is the thing per-frame scoring can't catch: six frames that are all sharp and
+all frontal, but with the face bouncing all over the frame, make a clip nobody wants
+to watch. It's measured as "how many *face widths* the face moves per second" —
+divided by face size, not frame size, because a large face moving 50px is normal
+while a small face moving 50px is a jump cut.
 
-Điểm từng frame gồm: độ chính diện 28, mặt to 23, độ nét 23, phơi sáng 10, điểm
-detect 10, và **ngữ cảnh 6** — đoạn có người khác trong khung thường là một khoảnh
-khắc thật (đang chơi, đang ăn, đang chụp cùng ai) chứ không phải một đoạn mặt nhìn
-vào máy. Ít thôi, để không biến video thành toàn cảnh đông người.
+The per-frame score is made up of: frontality 28, face size 23, sharpness 23,
+exposure 10, detection score 10, and **context 6** — a clip with other people in
+frame is usually a real moment (playing, eating, posing with someone) rather than a
+stretch of someone staring into the lens. Only a little weight, so video doesn't turn
+into nothing but crowd shots.
 
-Giữ `CLIP_PER_PERSON` đoạn tốt nhất, không chồng nhau, cho mỗi người mỗi video.
+Keep the `CLIP_PER_PERSON` best non-overlapping clips per person per video.
 
-**Cần `MEDIA_ROOT`.** Chế độ `IMMICH_URL` không dùng được cho stage này: tải cả
-thư viện video qua HTTP chỉ để quét là không hợp lý. Ưu tiên đọc
-`encodedVideoPath` (bản Immich đã transcode, thường H.264 mp4 — luôn decode được)
-rồi mới đến `originalPath`.
+**Requires `MEDIA_ROOT`.** The `IMMICH_URL` mode is not usable for this stage:
+downloading the entire video library over HTTP just to scan it makes no sense. It
+prefers reading `encodedVideoPath` (Immich's transcoded copy, usually H.264 mp4 —
+always decodable) and only falls back to `originalPath`.
 
-## Vì sao tách hai loại pose
+## Why the two kinds of pose are separate
 
-`buffalo_l` chỉ cho **head pose** (hướng quay của đầu). Muốn biết người đang
-đứng/ngồi/nằm, quay lưng hay chính diện thì cần model body pose riêng —
-ở đây là `yolov8n-pose`, chọn bản nano vì máy đích 8GB RAM / i5 không GPU.
+`buffalo_l` only gives **head pose** (which way the head is turned). To know whether
+a person is standing/sitting/lying, facing away or facing the camera, you need a
+separate body pose model — here that's `yolov8n-pose`, the nano variant, chosen
+because the target machine has 8GB RAM and an i5 with no GPU.
 
-## Cấu hình
+## Configuration
 
-Toàn bộ qua biến môi trường, xem `.env.example`. Bắt buộc:
+Everything goes through environment variables, see `.env.example`. Required:
 
-- `PG_PASSWORD` — mật khẩu Postgres của Immich
-- `MEDIA_ROOT` — đường dẫn tới `UPLOAD_LOCATION` của Immich (mount read-only),
-  hoặc `IMMICH_URL` + `IMMICH_API_KEY` nếu không mount được volume
+- `PG_PASSWORD` — Immich's Postgres password
+- `MEDIA_ROOT` — path to Immich's `UPLOAD_LOCATION` (mounted read-only),
+  or `IMMICH_URL` + `IMMICH_API_KEY` if you can't mount the volume
 
-Đọc file trực tiếp nhanh hơn nhiều và không tạo tải cho Immich server.
+Reading files directly is much faster and puts no load on the Immich server.
 
-## Chuẩn bị model
+## Preparing the models
 
-Chạy một lần trên máy có mạng, rồi copy thư mục `models/` sang máy đích:
+Run this once on a machine with network access, then copy the `models/` folder to the
+target machine:
 
 ```bash
-pip install ultralytics            # chỉ cần để export yolov8n-pose
+pip install ultralytics            # only needed to export yolov8n-pose
 python tools/fetch_models.py --all --out ./models
 ```
 
-Kết quả:
+Result:
 
 ```
 models/
@@ -116,108 +125,113 @@ models/
   yolov8n-pose.onnx
 ```
 
-## Chạy
+## Running
 
 ```bash
 pip install -r requirements.txt
 
-python job.py --dry-run          # kiểm tra pg + ảnh + video + model, không ghi gì
-python job.py                    # chạy cả 5 stage tuần tự
-python job.py --stage clips      # chạy riêng một stage
-python job.py --reset clips      # quét lại toàn bộ video
-python job.py --stats            # xem tiến độ
-python job.py --reset errors     # thử lại các ảnh lỗi đọc
+python job.py --dry-run          # check pg + photos + video + models, write nothing
+python job.py                    # run all 5 stages in sequence
+python job.py --stage clips      # run a single stage
+python job.py --reset clips      # rescan every video
+python job.py --stats            # show progress
+python job.py --reset errors     # retry photos that failed to read
 ```
 
-Job **resumable**: state nằm trong cột `face_state` / `body_state` / `clip_state`
-của `fp_asset`, commit theo lô `BATCH_COMMIT` (stage `clips` commit theo **từng
-video**). Sập giữa đường thì chạy lại là tiếp tục chỗ cũ, không làm lại từ đầu.
-Nhận SIGTERM thì dừng gọn sau khi commit lô đang chạy — an toàn khi k8s evict.
+The job is **resumable**: state lives in the `face_state` / `body_state` /
+`clip_state` columns of `fp_asset`, committed in `BATCH_COMMIT` batches (the `clips`
+stage commits **per video**). If it dies halfway through, re-running picks up where it
+left off instead of starting over. On SIGTERM it shuts down cleanly after committing
+the batch in flight — safe when k8s evicts it.
 
-Stage `clips` là stage đắt nhất. Ước lượng thô trên CPU 4 core: mỗi frame lấy mẫu
-mất cỡ 60–120ms cho detection + recognition, nên một video 1 phút ở `VIDEO_FPS=2`
-là 120 frame ≈ 10–15 giây. 500 video một phút là khoảng 1,5–2 giờ. Đặt
-`VIDEO_FPS=0` (mọi frame) thì nhân thêm với `fps` của video — chỉ dùng khi thật
-cần. Không muốn quét video thì `DO_VIDEO=0`.
+`clips` is the most expensive stage. Rough estimate on a 4-core CPU: each sampled
+frame costs about 60–120ms for detection + recognition, so a 1-minute video at
+`VIDEO_FPS=2` is 120 frames ≈ 10–15 seconds. 500 one-minute videos is roughly
+1.5–2 hours. Setting `VIDEO_FPS=0` (every frame) multiplies that by the video's `fps`
+— only use it when you really need it. If you don't want video scanned at all, set
+`DO_VIDEO=0`.
 
-## Chạy nhẹ để không đè Immich
+## Running light so Immich isn't starved
 
-Cùng node với Immich trên máy 8GB nên job cố tình chạy chậm và gọn:
+It shares a node with Immich on an 8GB machine, so the job is deliberately slow and
+small:
 
-- Tuần tự hoàn toàn, không thread, không process pool
-- **Chỉ một model trong RAM tại một thời điểm** — stage 3 giải phóng model
-  trước khi stage 4 load model khác. RAM peak ~700MB
-- `ONNX_THREADS=2` giới hạn cả onnxruntime lẫn BLAS
-- `SLEEP_MS` nghỉ giữa mỗi ảnh để nhường CPU
-- `MAX_SIDE=1600` hạ ảnh preview trước khi infer (bbox lưu chuẩn hoá 0..1 nên
-  không sai lệch)
-- `resources.limits` trong `deploy/k3s.yaml` chặn 2 CPU / 2GB RAM
+- Fully sequential, no threads, no process pool
+- **Only one model in RAM at a time** — stage 3 releases its model before stage 4
+  loads a different one. Peak RAM ~700MB
+- `ONNX_THREADS=2` caps both onnxruntime and BLAS
+- `SLEEP_MS` sleeps between photos to yield CPU
+- `MAX_SIDE=1600` downscales the preview image before inference (bboxes are stored
+  normalized 0..1, so nothing shifts)
+- `resources.limits` in `deploy/k3s.yaml` caps it at 2 CPU / 2GB RAM
 
-## Deploy k3s
+## Deploying on k3s
 
 ```bash
 kubectl create ns media
 kubectl -n media create secret generic immich-db --from-literal=password='...'
 docker build -f deploy/Dockerfile -t fp-indexer:1.0.0 .
 kubectl apply -f deploy/k3s.yaml
-kubectl -n media create job --from=cronjob/fp-indexer fp-run-1   # chạy tay ngay
+kubectl -n media create job --from=cronjob/fp-indexer fp-run-1   # run it right now, by hand
 ```
 
-Sửa hai `hostPath` trong `deploy/k3s.yaml` cho đúng máy bạn: thư mục model và
-thư mục upload của Immich. Job dùng `hostNetwork: true` để gọi Postgres của
-Immich qua `127.0.0.1` (Immich chạy bằng docker compose, ngoài k3s).
+Fix the two `hostPath` entries in `deploy/k3s.yaml` to match your machine: the models
+directory and Immich's upload directory. The job uses `hostNetwork: true` so it can
+reach Immich's Postgres over `127.0.0.1` (Immich runs under docker compose, outside
+k3s).
 
-`concurrencyPolicy: Forbid` đảm bảo không bao giờ có hai job chạy cùng lúc.
+`concurrencyPolicy: Forbid` guarantees two jobs never run at the same time.
 
-## Bảng kết quả
+## Result tables
 
-Prefix mặc định `fp_`, đổi bằng `TABLE_PREFIX`.
+The prefix defaults to `fp_`, change it with `TABLE_PREFIX`.
 
-**`fp_asset`** — một dòng mỗi ảnh: `taken_at`, `date_src`, `preview_path`,
+**`fp_asset`** — one row per photo: `taken_at`, `date_src`, `preview_path`,
 `n_face`, `n_body`, `face_state`, `body_state`, `err`.
 
-**`fp_face`** — một dòng mỗi khuôn mặt:
+**`fp_face`** — one row per face:
 
-- Từ Immich: `immich_face`, `person_id`, `person_name`, `x1..y2` (0..1), `emb`, `emb_norm`
-- Từ 1k3d68: `yaw`, `pitch`, `roll`, `frontality`, `ear`, `age`, `kps`, `lmk68`
-- Chỉ số ảnh: `eye_px`, `sharp`, `bright`, `symm`, `quality`
+- From Immich: `immich_face`, `person_id`, `person_name`, `x1..y2` (0..1), `emb`, `emb_norm`
+- From 1k3d68: `yaw`, `pitch`, `roll`, `frontality`, `ear`, `age`, `kps`, `lmk68`
+- Image metrics: `eye_px`, `sharp`, `bright`, `symm`, `quality`
 
-**`fp_body`** — một dòng mỗi người:
+**`fp_body`** — one row per person:
 
-- `x1..y2` (0..1), `det`, `kps` (float32[17][3] chuẩn hoá, 204 byte)
+- `x1..y2` (0..1), `det`, `kps` (float32[17][3] normalized, 204 bytes)
 - `orientation` front/back/side/unknown
 - `posture` standing/sitting/lying/unknown
-- `torso_deg` góc thân so với trục dọc, `body_front` 0..1
-- `face_fidx` khớp với `fp_face.fidx` nếu tìm được
+- `torso_deg` torso angle relative to vertical, `body_front` 0..1
+- `face_fidx` matched to `fp_face.fidx` when a match is found
 
-**`fp_vface`** — một dòng mỗi khuôn mặt **khớp được với một person** trên mỗi frame
-đã lấy mẫu của video: `t_ms`, bbox (0..1), `kps`, `person_id`, `sim`, `sim2`,
-`n_face` (tổng số mặt trong frame đó), `yaw`, `roll`, `frontality`, `sharp`,
-`bright`, `symm`, `eye_ratio`. Mặt của người lạ không lưu — không ai truy vấn, và
-lưu hết thì bảng phình ra vô ích.
+**`fp_vface`** — one row per face **matched to a person** on each sampled frame of a
+video: `t_ms`, bbox (0..1), `kps`, `person_id`, `sim`, `sim2`,
+`n_face` (total faces in that frame), `yaw`, `roll`, `frontality`, `sharp`,
+`bright`, `symm`, `eye_ratio`. Faces of unknown people are not stored — nobody
+queries them, and storing everything would bloat the table for nothing.
 
-**`fp_vclip`** — một dòng mỗi **đoạn đã chọn**: `person_id`, `cidx` (0 = tốt nhất),
+**`fp_vclip`** — one row per **selected clip**: `person_id`, `cidx` (0 = best),
 `t_start_ms`, `t_end_ms`, `score`, `sim`, `face_ratio`, `sharp`, `bright`,
-`frontality`, `motion`, và `track`.
+`frontality`, `motion`, and `track`.
 
-`track` là `float32[n][11]`: mỗi dòng là `t_giây` rồi 5 cặp `(x, y)` chuẩn hoá.
-Bước dựng video cần biết khuôn mặt ở đâu tại **từng** thời điểm để neo, không chỉ
-ở một mốc — một đoạn 3 giây lấy mẫu 2 fps chỉ có 6–7 mốc, nhét vào một blob 300
-byte là xong, và nội suy tuyến tính giữa hai mốc là đủ mượt. Nhờ vậy bước dựng
-không phải join lại `fp_vface`.
+`track` is a `float32[n][11]`: each row is `t_seconds` followed by 5 normalized
+`(x, y)` pairs. The rendering step needs to know where the face is at **every**
+timestamp to anchor on, not just at a single one — a 3-second clip sampled at 2 fps
+has only 6–7 timestamps, which fits in a 300-byte blob, and linear interpolation
+between two of them is smooth enough. That way the rendering step never has to join
+back against `fp_vface`.
 
-**`fp_run`** — log mỗi lần chạy stage. **`fp_state`** — checkpoint.
+**`fp_run`** — a log of every stage run. **`fp_state`** — checkpoints.
 
-`emb`, `kps`, `lmk68`, `kps` là `bytea` float32 little-endian. Đọc lại:
+`emb`, `kps`, `lmk68`, `kps` are little-endian float32 `bytea`. To read them back:
 
 ```python
 np.frombuffer(row["kps"], np.float32).reshape(17, 3)
 ```
 
-## Truy vấn ví dụ
+## Example queries
 
 ```sql
--- ảnh có đúng một người, đứng chính diện, mặt nét, mắt mở
+-- photos with exactly one person, standing, facing forward, sharp face, eyes open
 SELECT a.id, a.taken_at, f.quality, b.posture
 FROM fp_asset a
 JOIN fp_face f ON f.asset_id = a.id AND f.state = 1
@@ -227,52 +241,57 @@ WHERE a.n_body = 1
   AND b.posture = 'standing' AND b.orientation = 'front'
 ORDER BY a.taken_at;
 
--- phân bố tư thế theo năm
+-- posture distribution by year
 SELECT date_part('year', a.taken_at) y, b.posture, COUNT(*)
 FROM fp_body b JOIN fp_asset a ON a.id = b.asset_id
 GROUP BY y, b.posture ORDER BY y;
 ```
 
-## Giới hạn đã biết
+## Known limitations
 
-- Pose từ 1k3d68 là khớp affine 3D-3D với hình dáng trung bình của model, không
-  phải PnP có hiệu chuẩn camera. Đủ chính xác để lọc góc, không dùng để đo.
-- EAR tính từ 68 điểm 3D chiếu về 2D nên chỉ là tín hiệu gợi ý — dùng để gán cờ,
-  đừng dùng để loại thẳng.
-- `posture` suy từ tỉ lệ hình học, ảnh nửa người (không thấy chân) sẽ đoán theo
-  độ dọc của thân, có thể sai.
-- Đổi `FACE_MODEL` thì phải `--reset landmarks`; embedding từ Immich vẫn dùng
-  được vì Immich cũng chạy ArcFace của `buffalo_l`.
-- **Head pose của frame video là ước lượng từ 5 điểm**, không phải `1k3d68`.
-  `roll` chính xác, `yaw`/`pitch` chỉ đủ để lọc và xếp hạng. Chạy `1k3d68` cho
-  từng mặt của từng frame là nhân đôi chi phí của stage đắt nhất.
-- **Khớp person trong video dựa vào cosine giữa hai model cùng loại.** Giả thiết
-  là Immich dùng đúng `w600k_r50` của `buffalo_l` với template 5 điểm chuẩn. Nếu
-  instance của bạn cấu hình model recognition khác thì `sim` sẽ thấp bất thường —
-  `--stats` sẽ cho thấy `doan da chon` gần bằng 0 dù đã quét xong.
-- **Codec.** OpenCV bundle FFmpeg nên H.264 mp4 (bản Immich transcode ra) luôn
-  decode được. Video HEVC/AV1 gốc có thể không mở được; lúc đó `clip_state=-1`
-  kèm lý do, và bật transcode trong Immich là xong.
-- Video quay dọc, quay ngược, hoặc có nhiều người cùng lúc thì vẫn chạy, nhưng
-  `person_id` chỉ gán cho mặt vượt cả hai ngưỡng `VIDEO_SIM` và `VIDEO_MARGIN`.
+- Pose from 1k3d68 is a 3D-3D affine fit against the model's mean shape, not a PnP
+  solve with a calibrated camera. Accurate enough to filter by angle, not to measure
+  with.
+- EAR is computed from the 68 3D points projected back to 2D, so treat it as a hint —
+  use it to set a flag, don't use it to reject outright.
+- `posture` is inferred from geometric ratios; for half-body photos (legs not
+  visible) it falls back to how vertical the torso is, which can be wrong.
+- Changing `FACE_MODEL` requires `--reset landmarks`; the embeddings from Immich stay
+  usable because Immich also runs ArcFace from `buffalo_l`.
+- **Head pose for video frames is estimated from the 5 points**, not from `1k3d68`.
+  `roll` is accurate; `yaw`/`pitch` are only good enough to filter and rank. Running
+  `1k3d68` on every face of every frame would double the cost of the most expensive
+  stage.
+- **Person matching in video relies on cosine similarity between two instances of the
+  same model.** The assumption is that Immich really does use `w600k_r50` from
+  `buffalo_l` with the standard 5-point template. If your instance is configured with
+  a different recognition model, `sim` will be unusually low — `--stats` will show a
+  selected-clip count of nearly zero even though the scan finished.
+- **Codecs.** OpenCV bundles FFmpeg, so H.264 mp4 (what Immich transcodes to) always
+  decodes. Original HEVC/AV1 videos may fail to open; when that happens you get
+  `clip_state=-1` with a reason, and enabling transcoding in Immich fixes it.
+- Portrait video, upside-down video, or video with several people at once all still
+  work, but `person_id` is only assigned to faces that clear both the `VIDEO_SIM` and
+  `VIDEO_MARGIN` thresholds.
 
-## Kiểm thử
+## Testing
 
 ```bash
-python selftest.py     # không cần Postgres / Immich / model / video
+python selftest.py     # no Postgres / Immich / models / video needed
 ```
 
-Verify phần logic thuần của stage `clips`: chấm điểm frame, gom đoạn liên tục,
-phát hiện rung, trượt cửa sổ chọn đoạn (đoạn êm phải thắng đoạn rung khi điểm
-từng frame bằng nhau), `track` blob, và ước lượng hướng đầu từ 5 điểm. CI chạy
-script này trước khi build image.
+This verifies the pure logic of the `clips` stage: per-frame scoring, grouping frames
+into continuous runs, jitter detection, sliding-window clip selection (a steady clip
+must beat a jittery one when per-frame scores are equal), the `track` blob, and head
+pose estimation from the 5 points. CI runs this script before building the image.
 
-Phần cần Immich/Postgres/model thì verify trên máy đích:
+The parts that need Immich/Postgres/models get verified on the target machine:
 
 ```bash
 python job.py --dry-run
 ```
 
-Lệnh này kiểm tra kết nối Postgres, đọc thử ảnh preview, load cả ba bộ model
-(1k3d68, yolov8n-pose, det_10g + w600k_r50), đếm số person có vector trung tâm,
-mở thử một file video và lấy mẫu 2 giây đầu — rồi thoát mà không ghi gì.
+That command checks the Postgres connection, tries reading a preview image, loads all
+three model bundles (1k3d68, yolov8n-pose, det_10g + w600k_r50), counts how many
+people have a centroid vector, opens a video file and samples its first 2 seconds —
+then exits without writing anything.

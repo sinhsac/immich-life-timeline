@@ -413,7 +413,7 @@ def t_clip_select():
              for i in range(3)]
     r2 = select.apply(base + shaky, {})
     rej = [x for x in r2["rejected"] if x["asset_id"].startswith("v09")]
-    check(len(rej) == 3 and all("rung" in (x["reason"] or "") for x in rej),
+    check(len(rej) == 3 and all("shaky" in (x["reason"] or "") for x in rej),
           "doan rung bi loai kem ly do 'rung'")
 
     off = select.apply(base + vids, {"use_clips": False})
