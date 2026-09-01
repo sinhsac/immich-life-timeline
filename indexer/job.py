@@ -20,8 +20,14 @@ import signal
 import sys
 import time
 
-from idx import control, immich_src, pgdb, settings, stages
+from idx import control, immich_src, logfmt, pgdb, settings, stages
 from idx.media import MediaReader
+
+# Boc stdout/stderr ngay o muc module, TRUOC khi bat ky print() nao chay.
+# Dat trong main() thi mat cac dong in ra tu argparse va tu loi import.
+# Moi dong log tu day tro di co dang:
+#   2026-09-01T18:30:04+07:00 [a3f9c1d2] <noi dung>
+RUN_ID = logfmt.install("fp-indexer")
 
 STAGES = ("assets", "faces", "landmarks", "bodies", "clips")
 

@@ -18,9 +18,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from tl import db, render, textdraw
+from tl import db, logfmt, render, textdraw
 from tl.api import router
 from tl.settings import get
+
+# Boc stdout/stderr cho moi print() cua service.
+RUN_ID = logfmt.install("fp-timeline")
+# Rieng log cua uvicorn phai doi Formatter: uvicorn cau hinh logging TRUOC khi
+# import file nay, nen handler cua no giu tham chieu toi stderr GOC va khong bi
+# anh huong boi viec boc sys.stderr o tren.
+logfmt.attach_to_logging()
 
 STATIC = Path(__file__).resolve().parent / "static"
 
