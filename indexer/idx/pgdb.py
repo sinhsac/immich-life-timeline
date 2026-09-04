@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS {asset}(
   n_face        int  DEFAULT 0,
   n_body        int  DEFAULT 0,
   n_clip        int  DEFAULT 0,       -- so doan da chon ra tu video nay
+  n_vface       int  DEFAULT 0,       -- so dong fp_vface sinh ra tu video nay
+  n_vbody       int  DEFAULT 0,       -- so dong fp_vbody sinh ra tu video nay
+  n_vframe      int  DEFAULT 0,       -- so frame da lay mau
   face_state    smallint DEFAULT 0,   -- 0 cho | 1 xong | 2 co bbox+emb, cho landmark | -1 loi
   body_state    smallint DEFAULT 0,   -- 0 cho | 1 xong | -1 loi
   clip_state    smallint DEFAULT 0,   -- 0 cho | 1 xong | -1 loi | 2 bo qua (khong phai video)
@@ -32,21 +35,69 @@ CREATE TABLE IF NOT EXISTS {asset}(
 -- Mot dong moi khuon mat PHAT HIEN DUOC tren moi frame da lay mau cua video.
 -- Day la bang duy nhat sinh ra tu detection + recognition tu chay, vi Immich chi
 -- detect mat cho video tren dung mot frame thumbnail.
+--
+-- GIU CA MAT KHONG KHOP PERSON (person_id NULL). Ban dau bang nay bo han chung
+-- de khoi phinh, nhung the la tu chan duong: mot nguoi chua duoc gan ten trong
+-- Immich, hoac mot nguoi hoan toan moi, se khong de lai dau vet nao. Muon phat
+-- hien "day co the la mot person moi" thi phai co du lieu cua ho truoc da.
+--
+-- Vi vay bang nay luu du de KHONG BAO GIO phai quet lai video:
+--   emb      vector ArcFace -> gom cum mat la, gan ten sau ma khong quet lai
+--   lmk68    68 diem -> align duoc khi render, ngang voi anh tinh
+--   track_id gom cac mat cua cung mot nguoi trong cung mot video theo IoU
 CREATE TABLE IF NOT EXISTS {vface}(
   asset_id      uuid NOT NULL,
   t_ms          int  NOT NULL,        -- moc thoi gian trong video
-  fidx          smallint NOT NULL,    -- thu tu mat trong frame do
+  fidx          smallint NOT NULL,    -- thu tu mat trong frame do (theo dien tich)
   x1 real, y1 real, x2 real, y2 real, -- chuan hoa 0..1
   det           real,
   n_face        smallint,             -- tong so mat detect duoc trong frame do
   kps           bytea,                -- float32[5][2] chuan hoa 0..1
+  lmk68         bytea,                -- float32[68][3] chuan hoa, NULL neu tat 1k3d68
   person_id     uuid,                 -- khop voi person cua Immich, hoac NULL
+  person_name   text,
   sim           real,                 -- cosine voi vector trung tam cua person do
   sim2          real,                 -- cosine voi person xep thu hai
-  yaw real, roll real, frontality real,
+  -- track_id: cum theo IoU giua cac frame lien tiep, danh so trong PHAM VI MOT
+  -- video. Voi mat khong khop person day la moc de gom lai va hoi "cum nay xuat
+  -- hien 40 lan, co phai mot nguoi moi khong".
+  track_id      smallint,
+  yaw real, pitch real, roll real, frontality real,
   sharp real, bright real, symm real,
   eye_ratio     real,
+  ear           real,
+  age           real,
+  smile         real,                 -- 0..1, chi co khi VIDEO_LMK68=1
+  quality       real,                 -- cung cong thuc voi {face}.quality
+  emb           bytea,                -- float32[512] da chuan hoa L2
+  emb_norm      real,                 -- do dai vector truoc chuan hoa
+  -- CAMERA dich chuyen bao nhieu so voi frame lay mau TRUOC DO, chuan hoa theo
+  -- (w,h) cua frame. Nho no ma tach duoc "may rung" khoi "chu the dong": dich
+  -- chuyen cua mat trong khung = camera + chu the. Xem idx/motion.py.
+  -- NULL o frame dau tien, va khi canh qua tron de theo doi diem goc.
+  cam_dx        real,
+  cam_dy        real,
   PRIMARY KEY(asset_id, t_ms, fidx)
+);
+
+-- Body pose tren frame video: doi xung voi {body} cua anh tinh, them cot t_ms.
+-- Chay CUNG MOT LUOT giai ma voi {vface} — giai ma video (va o che do HTTP la
+-- tai ca file) dat hon nhieu so voi ban than model, nen quet hai lan la vo ly.
+CREATE TABLE IF NOT EXISTS {vbody}(
+  asset_id      uuid NOT NULL,
+  t_ms          int  NOT NULL,
+  pidx          smallint NOT NULL,
+  x1 real, y1 real, x2 real, y2 real, -- chuan hoa 0..1
+  det           real,
+  kps           bytea NOT NULL,       -- float32[17][3] = x,y,conf chuan hoa 0..1
+  n_visible     smallint,
+  orientation   text,                 -- 'front' | 'back' | 'side' | 'unknown'
+  posture       text,                 -- 'standing' | 'sitting' | 'lying' | 'unknown'
+  torso_deg     real,
+  body_front    real,
+  area_ratio    real,
+  face_fidx     smallint,             -- khop voi {vface}.fidx CUNG t_ms
+  PRIMARY KEY(asset_id, t_ms, pidx)
 );
 
 -- Doan video da chon: mot nguoi, mot khoang thoi gian, kem duong di cua khuon
@@ -65,7 +116,11 @@ CREATE TABLE IF NOT EXISTS {vclip}(
   sim           real,
   face_ratio    real,                 -- khoang cach hai mat / canh dai, trung binh
   sharp real, bright real, frontality real,
-  motion        real,                 -- do rung cua khung mat, cang thap cang on
+  smile         real,                 -- trung binh diem nu cuoi trong doan
+  motion        real,                 -- do rung TONG (may + chu the), giu nghia cu
+  -- Hai cot tach ra tu motion. NULL voi cac doan quet bang ban cu.
+  shake         real,                 -- rieng do lac cua MAY: cang thap cang on
+  action        real,                 -- rieng chuyen dong CHU THE: cang cao cang tot
   -- track: float32[n][11] = t_giay, roi 5 cap (x,y) chuan hoa. Nho vay buoc dung
   -- noi suy duoc diem neo o bat ky thoi diem nao ma khong phai join lai vface.
   track         bytea,
@@ -90,6 +145,9 @@ CREATE TABLE IF NOT EXISTS {face}(
   symm          real,
   ear           real,
   age           real,
+  -- 0..1 "dang cuoi", suy tu lmk68 (khoe mieng + be rong + do ho). Khong phai
+  -- model moi: 68 diem da co san. Xem metrics.smile_from_68.
+  smile         real,
   emb_norm      real,                 -- do dai vector ArcFace truoc chuan hoa
   quality       real,
   emb           bytea,                -- float32[512] da chuan hoa L2 (tuy COPY_EMBEDDING)
@@ -151,10 +209,20 @@ CREATE INDEX IF NOT EXISTS {p}asset_taken      ON {asset}(taken_at);
 CREATE INDEX IF NOT EXISTS {p}asset_kind       ON {asset}(kind);
 CREATE INDEX IF NOT EXISTS {p}face_state       ON {face}(state);
 CREATE INDEX IF NOT EXISTS {p}face_person      ON {face}(person_id);
+-- Buoc chon anh xep hang theo person + do hap dan, nen index ghep.
+CREATE INDEX IF NOT EXISTS {p}face_smile       ON {face}(person_id, smile DESC);
 CREATE INDEX IF NOT EXISTS {p}body_orient      ON {body}(orientation);
 CREATE INDEX IF NOT EXISTS {p}body_posture     ON {body}(posture);
 CREATE INDEX IF NOT EXISTS {p}vface_person     ON {vface}(person_id);
+CREATE INDEX IF NOT EXISTS {p}vface_track      ON {vface}(asset_id, track_id);
+-- Index rieng cho cau hoi "nhung mat chua biet la ai": partial index nen no chi
+-- to bang so dong that su chua khop, khong phai bang ca bang.
+CREATE INDEX IF NOT EXISTS {p}vface_unknown    ON {vface}(asset_id, track_id)
+  WHERE person_id IS NULL;
 CREATE INDEX IF NOT EXISTS {p}vclip_person     ON {vclip}(person_id, score DESC);
+CREATE INDEX IF NOT EXISTS {p}vbody_asset      ON {vbody}(asset_id, t_ms);
+CREATE INDEX IF NOT EXISTS {p}vbody_orient     ON {vbody}(orientation);
+CREATE INDEX IF NOT EXISTS {p}vbody_posture    ON {vbody}(posture);
 """
 
 
@@ -205,6 +273,31 @@ MIGRATIONS = (
     # Nang cap sang ban cat doan theo khoanh khac. Doan cu khong co t_peak_ms;
     # chung van dung duoc, chi thieu moc de hien tren UI.
     "ALTER TABLE {vclip} ADD COLUMN IF NOT EXISTS t_peak_ms int",
+    # Nang cap sang ban quet video day du. Du lieu vface cu VAN DUNG DUOC, chi
+    # thieu cac cot moi (NULL). Muon co day du thi 'job.py --reset clips'.
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS pitch real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS ear real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS age real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS quality real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS emb bytea",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS emb_norm real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS lmk68 bytea",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS person_name text",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS track_id smallint",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS n_vface int DEFAULT 0",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS n_vbody int DEFAULT 0",
+    "ALTER TABLE {asset} ADD COLUMN IF NOT EXISTS n_vframe int DEFAULT 0",
+    # Diem nu cuoi. Suy tu lmk68 DA LUU nen db cu khong phai quet lai anh:
+    # 'job.py --stage smiles' doc lai blob va dien cot nay.
+    "ALTER TABLE {face} ADD COLUMN IF NOT EXISTS smile real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS smile real",
+    "ALTER TABLE {vclip} ADD COLUMN IF NOT EXISTS smile real",
+    # Tach chuyen dong may / chu the. Can quet lai video de co (--reset clips):
+    # cam_dx/cam_dy phai do giua hai frame lien tiep, khong suy lai tu db duoc.
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS cam_dx real",
+    "ALTER TABLE {vface} ADD COLUMN IF NOT EXISTS cam_dy real",
+    "ALTER TABLE {vclip} ADD COLUMN IF NOT EXISTS shake real",
+    "ALTER TABLE {vclip} ADD COLUMN IF NOT EXISTS action real",
 )
 
 
@@ -212,7 +305,8 @@ def ensure_schema(conn, s):
     names = dict(
         p=s.prefix, asset=s.table("asset"), face=s.table("face"),
         body=s.table("body"), run=s.table("run"), state=s.table("state"),
-        vface=s.table("vface"), vclip=s.table("vclip"))
+        vface=s.table("vface"), vclip=s.table("vclip"),
+        vbody=s.table("vbody"))
     with conn.cursor() as cur:
         # Thu tu bat buoc: tao bang -> them cot thieu -> tao index.
         # Index co the tham chieu cot chi xuat hien o MIGRATIONS.

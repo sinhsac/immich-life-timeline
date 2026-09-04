@@ -54,7 +54,12 @@ class FaceDetector:
         return app
 
     def __call__(self, frame, embed=True):
-        """Tra ve list dict: bbox px, kps px (5,2), det, emb da chuan hoa L2."""
+        """Tra ve list dict: bbox px, kps px (5,2), det, emb chuan hoa L2, emb_norm.
+
+        emb_norm la do dai vector TRUOC khi chuan hoa. Chuan hoa xong thi thong
+        tin do mat, ma no lai la tin hieu chat luong dung duoc: ArcFace cho vector
+        ngan tren mat mo / bi che. fp_face cung luu cot nay nen hai ben so duoc.
+        """
         try:
             faces = self.app.get(frame) if embed else self.det.detect(frame)
         except Exception:                                 # noqa: BLE001
@@ -65,17 +70,20 @@ class FaceDetector:
             kps = getattr(f, "kps", None)
             if box is None or box.size < 4 or kps is None:
                 continue
+            norm = None
+            raw = getattr(f, "embedding", None)
+            if raw is not None:
+                raw = np.asarray(raw, np.float32)
+                norm = float(np.linalg.norm(raw))
             emb = getattr(f, "normed_embedding", None)
-            if emb is None:
-                e = getattr(f, "embedding", None)
-                if e is not None:
-                    e = np.asarray(e, np.float32)
-                    emb = e / max(float(np.linalg.norm(e)), 1e-6)
+            if emb is None and raw is not None:
+                emb = raw / max(norm or 0.0, 1e-6)
             out.append({
                 "bbox": box[:4],
                 "kps": np.asarray(kps, np.float32)[:5],
                 "det": float(getattr(f, "det_score", 0.0) or 0.0),
                 "emb": None if emb is None else np.asarray(emb, np.float32),
+                "emb_norm": norm,
             })
         out.sort(key=lambda r: -(r["bbox"][2] - r["bbox"][0])
                  * (r["bbox"][3] - r["bbox"][1]))
@@ -95,31 +103,33 @@ class PersonIndex:
     """
 
     def __init__(self, conn, s):
-        self.ids, self.mat = self._load(conn, s)
+        self.ids, self.mat, self.names = self._load(conn, s)
         self.sim_min = float(s.video_sim)
         self.margin = float(s.video_margin)
 
     @staticmethod
     def _load(conn, s):
         sql = f"""
-        SELECT person_id, emb FROM (
-            SELECT f.person_id, f.emb,
+        SELECT person_id, person_name, emb FROM (
+            SELECT f.person_id, f.person_name, f.emb,
                    row_number() OVER (PARTITION BY f.person_id
                                       ORDER BY f.quality DESC NULLS LAST) rn
             FROM {s.table('face')} f
             WHERE f.person_id IS NOT NULL AND f.emb IS NOT NULL AND f.state = 1
         ) t WHERE rn <= %s
         """
-        acc, cnt, dim = {}, {}, None
+        acc, cnt, names, dim = {}, {}, {}, None
         with conn.cursor() as cur:
             cur.execute(sql, (int(s.video_centroid_per),))
-            for pid, blob in cur:
+            for pid, pname, blob in cur:
                 v = np.frombuffer(blob, np.float32)
                 if dim is None:
                     dim = v.size
                 if v.size != dim or v.size == 0:
                     continue
                 key = str(pid)
+                if pname and key not in names:
+                    names[key] = pname
                 if key in acc:
                     acc[key] += v
                     cnt[key] += 1
@@ -129,10 +139,13 @@ class PersonIndex:
         conn.rollback()
         ids = sorted(acc)
         if not ids:
-            return [], np.zeros((0, 0), np.float32)
+            return [], np.zeros((0, 0), np.float32), {}
         mat = np.stack([acc[p] / cnt[p] for p in ids])
         mat /= np.maximum(np.linalg.norm(mat, axis=1, keepdims=True), 1e-9)
-        return ids, mat.astype(np.float32)
+        return ids, mat.astype(np.float32), names
+
+    def name_of(self, pid):
+        return self.names.get(str(pid)) if pid else None
 
     def __len__(self):
         return len(self.ids)

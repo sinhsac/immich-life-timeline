@@ -12,6 +12,12 @@ _R_EYE = slice(42, 48)
 _NOSE = 30
 _L_MOUTH = 48
 _R_MOUTH = 54
+_LIP_TOP, _LIP_BOT = 51, 57          # dinh moi tren / day moi duoi, vien NGOAI
+_LIP_IN_TOP, _LIP_IN_BOT = 62, 66    # vien TRONG -> do ho cua mieng
+
+# Duoi nguong nay thi 68 diem quanh mieng qua nhieu de suy bieu cam. Cung ly do
+# khien EAR khong dang tin o mat nho: mot con mat rong 16px chi co 6 diem mo ta.
+SMILE_MIN_EYE_PX = 26.0
 
 _W_DEFAULT = {"frontal": 40.0, "sharp": 25.0, "res": 25.0,
               "expo": 10.0, "embnorm": 10.0, "det": 10.0}
@@ -55,6 +61,93 @@ def ear_from_68(lmk):
     if p.shape[0] < 48:
         return None
     return 0.5 * (_ear_one(p[_L_EYE]) + _ear_one(p[_R_EYE]))
+
+
+def smile_from_68(lmk, eye_px=None, aspect=1.0):
+    """0..1 "dang cuoi", suy tu 68 diem. None neu khong du tin cay.
+
+    VI SAO CAN: moi chi so con lai trong module nay do MAT SACH KY THUAT — chinh
+    dien, net, sang deu. Xep hang bang chung thi anh the va selfie dung yen luon
+    thang, con anh dang cuoi ngoai dau lai thi bi loai. Mot video ky niem xep
+    hang nhu vay thi kho dep, bat ke buoc dung muot den dau.
+
+    KHONG can model moi: 1k3d68 da tra ve day du 68 diem va chung DA NAM trong
+    fp_face.lmk68 / fp_vface.lmk68. Day thuan la doc lai.
+
+    Cach do, trong he toa do CUA CHINH CAI MIENG nen khong phu thuoc roll:
+      u  truc ngang = huong tu khoe trai (48) sang khoe phai (54)
+      v  truc doc, vuong goc u, chieu duong huong xuong
+
+      curl   than moi nam THAP hon duong noi hai khoe bao nhieu. Cuoi thi hai
+             khoe bi keo len, nen than moi tut xuong tuong doi -> curl duong.
+             Meu thi nguoc lai -> curl am. Day la tin hieu chac nhat.
+      width  be rong mieng / khoang cach hai mat. Mieng thuong xap xi bang
+             khoang cach hai mat; cuoi rong thi vuot len 1.2-1.4.
+      open   do ho vien trong moi -> cuoi ho mieng / cuoi to.
+
+    Ca 'width' va 'open' deu chia cho KHOANG CACH HAI MAT, khong chia cho be rong
+    mieng. Chia cho be rong mieng thi mieng hep tu nhien duoc cong diem ho, va
+    mot khuon mat meu (mieng hep) leo len tren mot khuon mat trung tinh — do la
+    loi that da gap khi thu.
+
+    Diem chi di tu 0 len: meu va trung tinh deu ra ~0. No do "cuoi bao nhieu",
+    khong do sac thai am duong.
+
+    CANH BAO ve hieu chuan: cac moc so duoi day dua tren ty le nhan trac khuon
+    mat, KHONG phai do tu tap du lieu co nhan. Chung dung de XEP HANG trong cung
+    mot thu vien, dung doc ra thanh "nguoi nay cuoi 0.8". Gia tri tho duoc luu
+    nguyen vao db de xem lai vai chuc anh roi hieu chuan lai neu can.
+
+    aspect = img_w/img_h. Bat buoc khi doc lai tu db: lmk68 luu chuan hoa x/w va
+    y/h RIENG nhau, nen voi anh khong vuong thi he toa do bi keo mot chieu — goc
+    va ty le tinh tren do la sai. Truyen aspect de dua ve dang doanh. Luc index
+    thi toa do con la pixel, aspect=1.0.
+    """
+    if lmk is None:
+        return None
+    p = np.asarray(lmk, np.float32)
+    if p.ndim != 2 or p.shape[0] < 68:
+        return None
+    if eye_px is not None and float(eye_px) < SMILE_MIN_EYE_PX:
+        return None
+    p = p[:, :2].astype(np.float32).copy()
+    if aspect and aspect != 1.0:
+        p[:, 0] *= float(aspect)
+
+    left, right = p[_L_MOUTH], p[_R_MOUTH]
+    u = right - left
+    width = float(np.hypot(u[0], u[1]))
+    if width < 1e-6:
+        return None
+    u = u / width
+    v = np.array([-u[1], u[0]], np.float32)     # phap tuyen; dau se chuan sau
+    mid = (left + right) / 2.0
+
+    # Chieu duong cua v phai la "xuong duoi mat nguoi". Lay day moi duoi (57) lam
+    # moc: no luon nam duoi duong noi hai khoe, bat ke anh bi xoay bao nhieu.
+    if float(np.dot(p[_LIP_BOT] - mid, v)) < 0:
+        v = -v
+
+    def proj_v(i):
+        return float(np.dot(p[i] - mid, v))
+
+    eye_l, eye_r = p[_L_EYE].mean(0), p[_R_EYE].mean(0)
+    inter = float(np.linalg.norm(eye_r - eye_l))
+
+    def unit(x, lo, hi):
+        return max(0.0, min(1.0, (x - lo) / (hi - lo)))
+
+    curl_t = unit((proj_v(_LIP_TOP) + proj_v(_LIP_BOT)) / 2.0 / width,
+                  0.010, 0.110)
+    gap = abs(proj_v(_LIP_IN_BOT) - proj_v(_LIP_IN_TOP))
+    if inter <= 1e-6:
+        # Khong doc duoc khoang cach hai mat: chi con curl la dang tin, do la
+        # dai luong duy nhat khong can moc so sanh ben ngoai cai mieng.
+        return float(curl_t)
+    open_t = unit(gap / inter, 0.03, 0.30)
+    w_t = unit(width / inter, 1.00, 1.32)
+    return float(max(0.0, min(1.0,
+                              0.45 * curl_t + 0.40 * w_t + 0.15 * open_t)))
 
 
 def symmetry(aligned_gray):

@@ -29,7 +29,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import media, projects, story, textdraw
+from . import beats as beatmod
+from . import media, music, projects, story, textdraw
 from .db import rows
 from .settings import get
 
@@ -74,6 +75,33 @@ DEFAULT_OPTIONS = {
     "audio_fade_out": 0.6,
     "audio_gain": 0.0,        # dB
     "audio_normalize": True,  # can muc giua cac doan, roi chan dinh
+
+    # ---------------- nhac nen ----------------
+    # Ten bai trong MUSIC_DIR (tuong doi, xem tl/music.py). None = khong co nhac.
+    #
+    # Nhac giai quyet mot van de CAU TRUC, khong phai trang tri: anh tinh im
+    # lang, doan video co tieng, nen mot video tron thanh tung khoi tieng roi rac
+    # giua nhung khoang lang. Nhac giu mach am lien tuc tu dau den cuoi.
+    "music": None,
+    "music_gain": -14.0,      # dB. Nhac la NEN, khong phai chu the
+    # Ha nhac bao nhieu dB khi tieng that cua doan video dang phat. Day la
+    # 'ducking' — thu khien nhac va tieng cung ton tai duoc thay vi tranh nhau.
+    "music_duck": -11.0,
+    "music_fade_in": 1.2,
+    "music_fade_out": 2.5,
+    "music_loop": True,       # bai ngan hon video thi lap lai
+
+    # Cat canh dung phach nhac. Chi co tac dung khi da chon 'music'.
+    #
+    # KHONG bo cau truc hero/beat: do dai tu nhien cua moi shot van tinh nhu cu,
+    # roi bien that duoc keo ve phach gan nhat. Nhac nhanh -> canh don dap; nhac
+    # cham -> canh dai va sau. Do dai video se lech mot chut so voi du toan, do
+    # la he qua tat yeu cua viec bam nhip.
+    #
+    # beat_every=2 nghia la cat moi hai phach — voi nhac 140 BPM thi mot phach
+    # chi 0.43 giay, cat moi phach la qua nhanh cho video ky niem.
+    "beat_sync": False,
+    "beat_every": 1,
 
     # Ke thua tu filters cua du an de so anh va thoi luong khop nhau.
     # Gui len o day thi ghi de, nhung chi doi NHIP chu khong doi anh da chon.
@@ -151,6 +179,22 @@ def options(over=None, filters=None):
     o["audio_fade_out"] = max(0.02, min(3.0, float(o["audio_fade_out"])))
     o["audio_gain"] = max(-24.0, min(12.0, float(o["audio_gain"])))
     o["audio_normalize"] = bool(o["audio_normalize"])
+    # Ten bai chi duoc GIU LAI neu phan giai duoc thanh mot file that nam trong
+    # MUSIC_DIR. Khong hop le thi bo im lang thay vi bao loi: mot cai ten sai
+    # khong nen lam that bai ca lan render.
+    o["music"] = (str(o["music"]).strip() or None) if o["music"] else None
+    if o["music"] and music.resolve(get(), o["music"]) is None:
+        print(f"[render] khong tim thay ban nhac {o['music']!r} trong MUSIC_DIR "
+              f"-> render khong nhac")
+        o["music"] = None
+    o["music_gain"] = max(-40.0, min(6.0, float(o["music_gain"])))
+    o["music_duck"] = max(-40.0, min(0.0, float(o["music_duck"])))
+    o["music_fade_in"] = max(0.0, min(8.0, float(o["music_fade_in"])))
+    o["music_fade_out"] = max(0.0, min(10.0, float(o["music_fade_out"])))
+    o["music_loop"] = bool(o["music_loop"])
+    # Bam nhip ma khong co nhac thi khong co gi de bam vao.
+    o["beat_sync"] = bool(o["beat_sync"]) and o["music"] is not None
+    o["beat_every"] = max(1, min(8, int(o["beat_every"])))
     o["fps"] = max(1, min(30, int(o["fps"])))
     o["crf"] = max(14, min(32, int(o["crf"])))
     if o["smooth"] not in ("none", "blend"):
@@ -219,7 +263,7 @@ def start(project_id, over=None):
 
     sb = None
     if o["mode"] == "story":
-        sb = story.storyboard(fr, o)
+        sb = _storyboard(fr, o, s)
         n_total = sb["n_frames"]
         note = {"n_shots": sb["n_shots"], "n_hero": sb["n_hero"],
                 "n_chapter": len(sb["chapters"]), "n_clip": sb["n_clip"],
@@ -248,6 +292,58 @@ def _jsonable(o):
             if isinstance(v, (str, int, float, bool, type(None)))}
 
 
+# Ket qua do nhip duoc nho lai theo (file, so lan sua doi): mot ban nhac cho ra
+# cung mot luoi phach mai mai, ma do nhip la giai ma ca bai + FFT — khong co ly gi
+# lam lai moi lan nguoi dung keo mot thanh truot o buoc xem truoc.
+_beat_cache = {}
+
+
+def beat_grid(o, s, total_s):
+    """Luoi phach cho storyboard, hoac None. Dung chung boi xem truoc va render.
+
+    total_s la do dai NHAM cua video: luoi phai phu het, va nhac ngan hon video
+    thi beats.grid() noi tiep bang chinh chu ky trung binh.
+    """
+    if not o.get("beat_sync") or not o.get("music"):
+        return None
+    p = music.resolve(s, o["music"])
+    if p is None:
+        return None
+    try:
+        key = (str(p), p.stat().st_mtime_ns)
+    except OSError:
+        return None
+    hit = _beat_cache.get(key)
+    if hit is None:
+        hit = beatmod.detect(p, s)
+        _beat_cache[key] = hit
+        if hit[0]:
+            print(f"[render] nhip {p.name}: {len(hit[0])} phach, "
+                  f"{hit[1]:.0f} BPM")
+        else:
+            print(f"[render] khong tim ra nhip ro trong {p.name} "
+                  f"-> dung nhip ke chuyen thong thuong")
+    times, _bpm = hit
+    if not times:
+        return None
+    return beatmod.grid(times, max(1.0, float(total_s) * 1.5),
+                        o.get("beat_every", 1))
+
+
+def _storyboard(fr, o, s):
+    """storyboard() co bam nhip. Hai buoc vi luoi phach can biet do dai nham.
+
+    Do dai nham lay tu chinh storyboard chay MOT LAN khong bam nhip. Khong the
+    doan truoc bang cong thuc: doan video mang do dai cua chinh no, the tieu de va
+    doan dong man cong them, va cac chuong dau/cuoi duoc keo dai 12%.
+    """
+    sb = story.storyboard(fr, o)
+    grid = beat_grid(o, s, sb["duration_s"])
+    if not grid:
+        return sb
+    return story.storyboard(fr, o, beats=grid)
+
+
 def plan_for(project_id, over=None):
     """Storyboard cho UI xem truoc, khong render gi. Tra ve tom tat + tung shot."""
     s = get()
@@ -263,12 +359,13 @@ def plan_for(project_id, over=None):
                 "duration_s": round(n / float(o["fps"]), 2), "chapters": [],
                 "shots": []}
     fr, n_missing = preflight(fr, s)
-    sb = story.storyboard(fr, o)
+    sb = _storyboard(fr, o, s)
     return {
         "mode": "story", "n_shots": sb["n_shots"], "n_frames": sb["n_frames"],
         "fps": sb["fps"], "duration_s": sb["duration_s"],
         "n_hero": sb["n_hero"], "n_clip": sb["n_clip"], "n_missing": n_missing,
         "pace": sb["pace"], "target_seconds": sb["target_seconds"],
+        "n_beat_snap": sb.get("n_beat_snap", 0),
         "text_backend": textdraw.backend(),
         "chapters": sb["chapters"],
         "shots": [{"asset_id": sh["asset_id"], "fidx": sh["fidx"],
@@ -788,10 +885,107 @@ def audio_plan(shots, sb, o, s):
     return out
 
 
-def audio_filter(plan, o, total):
-    """Chuoi filter_complex cho ffmpeg + nhan cua dau ra. ('', '') neu khong co."""
-    if not plan:
+# Nhac ha xuong / tro lai trong bao nhieu giay quanh moi doan co tieng that.
+# 0.6s la du de tai khong nghe thay "nac" ma cung khong tre den muc cau dau tien
+# cua doan bi nhac de len.
+DUCK_RAMP = 0.6
+
+# Tran so khoang ducking. Vuot qua thi gop cac khoang lai gan hon: mot bieu thuc
+# volume voi 200 so hang la thu ffmpeg phai danh gia MOI FRAME tieng.
+DUCK_MAX_SPANS = 40
+
+
+def merge_spans(spans, gap):
+    """Gop cac khoang [a,b] chong nhau hoac cach nhau duoi `gap`."""
+    out = []
+    for a, b in sorted(spans):
+        if out and a - out[-1][1] <= gap:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def duck_spans(plan, ramp=DUCK_RAMP, cap=DUCK_MAX_SPANS):
+    """Cac khoang thoi gian co tieng that -> can ha nhac.
+
+    Gop dan cho den khi con duoi `cap` khoang. Gop them chi lam nhac bi ha lau
+    hon mot chut, khong lam sai gi — con mot bieu thuc dai vo han thi lam cham
+    ca lan render.
+    """
+    spans = [(float(a["at"]), float(a["at"]) + float(a["dur"])) for a in plan
+             if float(a["dur"]) > 0]
+    if not spans:
+        return []
+    gap = ramp * 2.0
+    merged = merge_spans(spans, gap)
+    while len(merged) > cap:
+        gap *= 2.0
+        merged = merge_spans(merged, gap)
+    return merged
+
+
+def duck_expr(spans, duck_db, ramp=DUCK_RAMP):
+    """Bieu thuc `volume` cua ffmpeg: 1.0 luc thuong, ha xuong trong cac khoang.
+
+    Vi sao khong dung sidechaincompress — cach lam "dung sach" cho ducking:
+    o day ta DA BIET chinh xac tieng that nam o giay nao (audio_plan tinh ra
+    truoc khi goi ffmpeg). Mot compressor phai suy dieu do tu bien do tin hieu,
+    va muc ha thi phu thuoc threshold/ratio nen khong dat duoc "ha dung 11 dB".
+    Duong bao tinh san thi chinh xac, on dinh giua cac lan chay, va kiem tra duoc
+    bang mot ham Python.
+
+    Moi khoang la mot hinh thang: len trong `ramp` giay truoc khi vao, giu, roi
+    xuong trong `ramp` giay sau khi ra. Lay max cua cac hinh thang de hai khoang
+    gan nhau khong cong don thanh ha gap doi.
+    """
+    if not spans or duck_db >= 0:
+        return None
+    g = 10.0 ** (float(duck_db) / 20.0)
+    terms = []
+    for a, b in spans:
+        lo = max(0.0, a - ramp)
+        terms.append(f"clip((t-{lo:.3f})/{ramp:.3f},0,1)"
+                     f"*clip(({b + ramp:.3f}-t)/{ramp:.3f},0,1)")
+    env = terms[0]
+    for t in terms[1:]:
+        env = f"max({env},{t})"
+    return f"1-{1.0 - g:.4f}*({env})"
+
+
+def music_chain(idx, o, total, spans):
+    """Chuoi filter cho mot input nhac -> nhan [mus]."""
+    fin = min(float(o["music_fade_in"]), total / 2.0)
+    fout = min(float(o["music_fade_out"]), total / 2.0)
+    parts = [f"[{idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:"
+             f"channel_layouts=stereo",
+             f"atrim=0:{total:.3f}", "asetpts=N/SR/TB",
+             f"volume={float(o['music_gain']):.2f}dB"]
+    expr = duck_expr(spans, float(o["music_duck"]))
+    if expr:
+        # eval=frame: bieu thuc phu thuoc t nen phai danh gia lai tung frame,
+        # mac dinh (eval=once) se lay gia tri tai t=0 va giu nguyen ca bai.
+        parts.append(f"volume='{expr}':eval=frame")
+    if fin > 0:
+        parts.append(f"afade=t=in:st=0:d={fin:.2f}")
+    if fout > 0:
+        parts.append(f"afade=t=out:st={max(0.0, total - fout):.2f}:d={fout:.2f}")
+    return ",".join(parts) + "[mus]"
+
+
+def audio_filter(plan, o, total, music_idx=None):
+    """Chuoi filter_complex cho ffmpeg + nhan cua dau ra. ('', '') neu khong co.
+
+    music_idx: chi so input cua ban nhac trong dong lenh ffmpeg, hoac None.
+    Ba truong hop: chi tieng doan, chi nhac, hoac ca hai (nhac bi ducking).
+    """
+    if not plan and music_idx is None:
         return "", ""
+    if not plan:
+        # Chi co nhac: toan bo video la anh tinh, hoac tieng doan bi tat.
+        return (music_chain(music_idx, o, total, []) + ";"
+                + f"[mus]alimiter=limit=0.95,apad=whole_dur={total:.3f}[aout]",
+                "[aout]")
     parts, labels = [], []
     for k, a in enumerate(plan, start=1):
         lab = f"a{k}"
@@ -824,12 +1018,22 @@ def audio_filter(plan, o, total):
         tail.append("dynaudnorm=f=250:g=7:p=0.9")
     if abs(float(o["audio_gain"])) > 0.01:
         tail.append(f"volume={float(o['audio_gain']):.2f}dB")
-    tail.append("alimiter=limit=0.95")
-    # apad + do dai chinh xac: doan cuoi thuong ket thuc truoc khi video het,
-    # thieu apad thi track tieng ngan hon track hinh va mot so may phat bo qua
-    # luon phan cuoi.
-    tail.append(f"apad=whole_dur={total:.3f}")
-    parts.append(f"[{last}]" + ",".join(tail) + "[aout]")
+    if music_idx is None:
+        tail.append("alimiter=limit=0.95")
+        # apad + do dai chinh xac: doan cuoi thuong ket thuc truoc khi video het,
+        # thieu apad thi track tieng ngan hon track hinh va mot so may phat bo
+        # qua luon phan cuoi.
+        tail.append(f"apad=whole_dur={total:.3f}")
+        parts.append(f"[{last}]" + ",".join(tail) + "[aout]")
+        return ";".join(parts), "[aout]"
+
+    # Co nhac: tieng doan giu nguyen muc, nhac bi ha trong dung nhung khoang do.
+    # normalize=0 vi hai nguon nay CO Y chong len nhau — chia doi muc thi vua mat
+    # tieng that vua mat nhac.
+    parts.append(f"[{last}]" + ",".join(tail) + "[voice]")
+    parts.append(music_chain(music_idx, o, total, duck_spans(plan)))
+    parts.append(f"[mus][voice]amix=inputs=2:normalize=0:dropout_transition=0,"
+                 f"alimiter=limit=0.95,apad=whole_dur={total:.3f}[aout]")
     return ";".join(parts), "[aout]"
 
 
@@ -840,14 +1044,20 @@ def _mux_audio(video, shots, sb, o, s, work):
     Ly do: video duoc copy nguyen (-c:v copy) nen re, va neu buoc tieng that bai
     vi bat ky ly do gi thi van con nguyen video im lang — thay vi mat ca video.
     """
-    if not o["audio"]:
-        return None
-    plan = [a for a in audio_plan(shots, sb, o, s)
-            if _has_audio(a["path"], s)]
-    if not plan:
-        return None
+    plan = []
+    if o["audio"]:
+        plan = [a for a in audio_plan(shots, sb, o, s)
+                if _has_audio(a["path"], s)]
     total = sb["n_frames"] / float(sb["fps"])
-    fc, out_lab = audio_filter(plan, o, total)
+
+    # Nhac doc lap voi tieng doan: video toan anh tinh (khong co doan nao co
+    # tieng) van phai co nhac, va do chinh la truong hop nhac giup nhieu nhat.
+    mus = music.resolve(s, o["music"]) if o.get("music") else None
+    if not plan and mus is None:
+        return None
+
+    music_idx = (1 + len(plan)) if mus is not None else None
+    fc, out_lab = audio_filter(plan, o, total, music_idx)
     if not fc:
         return None
 
@@ -857,12 +1067,21 @@ def _mux_audio(video, shots, sb, o, s, work):
     for a in plan:
         cmd += ["-ss", f"{a['src_start']:.3f}", "-t", f"{a['dur']:.3f}",
                 "-vn", "-i", a["path"]]
+    if mus is not None:
+        # -stream_loop thay vi filter aloop: aloop dem bang SAMPLE va phai giu ca
+        # vong lap trong bo dem, mot bai 3 phut la ~8.6 trieu sample moi kenh.
+        # stream_loop cho ffmpeg doc lai file, ton gan nhu khong gi.
+        dur = music.duration(mus, s)
+        if o["music_loop"] and (dur is None or dur < total):
+            cmd += ["-stream_loop", "-1"]
+        cmd += ["-vn", "-i", str(mus)]
     cmd += ["-filter_complex", fc,
             "-map", "0:v", "-map", out_lab,
             "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2",
             "-t", f"{total:.3f}", "-movflags", "+faststart", str(dst)]
     log = work / "ffmpeg-audio.log"
-    print(f"[render] ghep tieng tu {len(plan)} doan")
+    print(f"[render] ghep tieng tu {len(plan)} doan"
+          + (f" + nhac {mus.name}" if mus is not None else ""))
     with open(log, "wb") as fh:
         rc = subprocess.run(cmd, stdout=fh, stderr=fh).returncode
     if rc != 0 or not dst.exists() or dst.stat().st_size == 0:

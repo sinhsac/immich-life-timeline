@@ -38,8 +38,14 @@ Module nay thuan tinh toan — khong doc video, khong goi model, khong cham db.
 # mot khoanh khac that (dang choi, dang an, dang chup cung ai do) chu khong phai
 # mot doan mat nhin vao may. Yeu cau la "doan dep nhat CO NGU CANH NHAT", nen no
 # co diem — nhung it, de khong bien video thanh toan canh dong nguoi.
-W = {"frontal": 28.0, "face": 23.0, "sharp": 23.0, "expo": 10.0,
-     "det": 10.0, "context": 6.0}
+#
+# 'smile' duoc them sau, va viec them no keo trong so cua 'frontal' xuong. Ly do:
+# ban dau 'frontal' la trong so lon nhat, nen doan thang cuoc luon la doan nguoi
+# do nhin thang vao may — dung ky thuat, nhung mot doan dang cuoi ngoai dau lai
+# thi dang gia hon. Do cuoi la thu gan nhat voi "khoanh khac" ma bo chi so nay
+# do duoc.
+W = {"frontal": 20.0, "face": 20.0, "sharp": 20.0, "smile": 18.0,
+     "expo": 8.0, "det": 8.0, "context": 6.0}
 
 # Mat cach nhau 9% canh dai la "thay ro nguoi" — tren muc do khong cong them.
 FACE_REF = 0.09
@@ -62,7 +68,12 @@ def score_frame(f):
     expo = 0.5 if br is None else 1.0 - min(1.0, abs(float(br) - BRIGHT_MID) / BRIGHT_MID)
     det = min(1.0, max(0.0, float(f.get("det") or 0.0)))
     ctx = min(1.0, max(0, int(f.get("n_face") or 1) - 1) / 2.0)
+    # smile=None nghia la "mat qua nho de doc bieu cam", khong phai "khong cuoi".
+    # Coi nhu trung binh, dung voi cach module nay xu ly moi chi so thieu.
+    sm = f.get("smile")
+    sm = 0.5 if sm is None else max(0.0, min(1.0, float(sm)))
     return (W["frontal"] * fr + W["face"] * face + W["sharp"] * sharp
+            + W["smile"] * sm
             + W["expo"] * expo + W["det"] * det + W["context"] * ctx)
 
 
@@ -79,14 +90,14 @@ def runs(samples, gap_ms=800):
     return out
 
 
-def motion_of(win):
-    """Do rung: khuon mat dich chuyen bao nhieu "chieu rong mat" moi giay.
+def _rate(win, pick):
+    """Trung binh cua |pick(a,b)| / be rong mat / giay, tren cac cap frame lien tiep.
 
     Chia cho kich thuoc mat chu khong phai cho kich thuoc khung: mat to di 50px
     la binh thuong, mat nho di 50px la giat.
     """
     if len(win) < 2:
-        return 0.0
+        return 0.0, 0
     tot, n = 0.0, 0
     for a, b in zip(win, win[1:]):
         dt = (b["t_ms"] - a["t_ms"]) / 1000.0
@@ -95,11 +106,63 @@ def motion_of(win):
         scale = max(1e-6, (a.get("face_px") or 0.0))
         if scale <= 1e-6:
             continue
-        dx = (b.get("cx") or 0.0) - (a.get("cx") or 0.0)
-        dy = (b.get("cy") or 0.0) - (a.get("cy") or 0.0)
-        tot += ((dx * dx + dy * dy) ** 0.5) / scale / dt
+        d = pick(a, b)
+        if d is None:
+            continue
+        tot += ((d[0] * d[0] + d[1] * d[1]) ** 0.5) / scale / dt
         n += 1
-    return tot / n if n else 0.0
+    return (tot / n if n else 0.0), n
+
+
+def _face_delta(a, b):
+    return ((b.get("cx") or 0.0) - (a.get("cx") or 0.0),
+            (b.get("cy") or 0.0) - (a.get("cy") or 0.0))
+
+
+def motion_of(win):
+    """Do rung TONG: khuon mat dich chuyen bao nhieu "chieu rong mat" moi giay.
+
+    Y nghia KHONG DOI so voi truoc, va do la co y: fp_vclip.motion cung bo loc
+    max_clip_motion cua buoc chon anh deu doc con so nay, doi nghia la moi nguong
+    nguoi dung da dat deu lech.
+
+    Muon tach camera va chu the thi dung shake_of() / action_of().
+    """
+    return _rate(win, _face_delta)[0]
+
+
+def shake_of(win):
+    """Do RUNG CUA MAY: dich chuyen toan cuc cua khung. None neu chua co du lieu.
+
+    None nghia la ban quet cu chua co cam_dx/cam_dy — phia goi phai lui ve dung
+    motion_of() nhu truoc, khong duoc coi None la 0 (se thanh "may rat on dinh"
+    va moi doan rung deu duoc diem cao).
+    """
+    def pick(a, b):
+        dx, dy = b.get("cam_dx"), b.get("cam_dy")
+        return None if dx is None or dy is None else (dx, dy)
+
+    val, n = _rate(win, pick)
+    return val if n else None
+
+
+def action_of(win):
+    """Chuyen dong CUA CHU THE: dich chuyen cua mat sau khi tru phan cua may.
+
+        mat trong khung = may + chu the   =>   chu the = mat - may
+
+    Day la thu dang duoc CONG diem: nhay len, cung ly, be quay lai cuoi. None neu
+    chua co du lieu camera.
+    """
+    def pick(a, b):
+        dx, dy = b.get("cam_dx"), b.get("cam_dy")
+        if dx is None or dy is None:
+            return None
+        fx, fy = _face_delta(a, b)
+        return (fx - dx, fy - dy)
+
+    val, n = _rate(win, pick)
+    return val if n else None
 
 
 def smooth(vals, k=3):
@@ -222,8 +285,31 @@ def clip_bounds(run, i, j, peak, sample_ms, min_ms, max_ms, dur_ms=0):
     return int(round(t0)), int(round(t1))
 
 
+# Chuyen dong chu the bao nhieu la "dang co chuyen gi xay ra". 1.2 be rong mat
+# moi giay: khoang mot nguoi vung tay hoac quay nguoi, khong phai dung yen noi
+# chuyen. Vuot muc nay thi khong cong them nua — di qua nhanh la mo, va phan mo
+# da bi tru qua 'sharp' roi.
+ACTION_REF = 1.2
+
+# Cong toi da bao nhieu cho doan co chu the dong. 0.25 = doan hanh dong dep hon
+# doan tinh tuong duong 25%. Du de thay doi thu tu xep hang, khong du de mot doan
+# nhoe nhoet thang mot doan net.
+W_ACTION = 0.25
+
+
 def score_window(win, sample_ms, target_ms):
-    """Diem cua mot cua so, da tinh do rung va do day frame."""
+    """Diem cua mot cua so, da tinh do rung, chuyen dong chu the va do day frame.
+
+    Cho nay tung gop moi chuyen dong lam mot va TRU DIEM tat ca. Ket qua la mot
+    cu nhay len bi phat y nhu mot cu rung tay — trong khi cu nhay chinh la thu ta
+    dang di tim. Gio hai thu duoc tach:
+
+        chia cho (1 + 0.8 * shake)      may lac -> tru, nhu cu
+        nhan voi (1 + W_ACTION * act)   chu the dong -> cong
+
+    Khong co du lieu camera (ban quet cu) thi lui ve dung cong thuc cu, khong
+    doan bua.
+    """
     if len(win) < 2:
         return 0.0, {}
     dur = win[-1]["t_ms"] - win[0]["t_ms"]
@@ -234,12 +320,18 @@ def score_window(win, sample_ms, target_ms):
     want = max(1.0, dur / max(1.0, sample_ms) + 1.0)
     cover = min(1.0, len(win) / want)
     motion = motion_of(win)
+    shake = shake_of(win)
+    action = action_of(win)
     # Uu tien do dai gan target, nhung khong cung nhac: mot doan 4s tot han han
     # thi van thang mot doan 2.6s tam thuong.
     fit = 1.0 - 0.25 * min(1.0, abs(dur - target_ms) / max(1.0, target_ms))
-    score = base * cover * fit / (1.0 + 0.8 * motion)
+    penal = motion if shake is None else shake
+    bonus = (1.0 + W_ACTION * min(1.0, action / ACTION_REF)
+             if action is not None else 1.0)
+    score = base * cover * fit * bonus / (1.0 + 0.8 * penal)
     return score, {"dur_ms": int(dur), "n": len(win), "cover": cover,
-                   "motion": motion, "base": base}
+                   "motion": motion, "shake": shake, "action": action,
+                   "base": base}
 
 
 def best_windows(samples, sample_ms, target_ms=2600, min_ms=1200, max_ms=4500,
@@ -309,7 +401,12 @@ def summarize(win):
         "sharp": avg("sharp", 0.0),
         "bright": avg("bright", 0.0),
         "frontality": avg("frontality", 0.0),
+        # Khong co default: mat qua nho thi smile la None mot cach co y, va
+        # 0.0 se bi doc thanh "chac chan khong cuoi" thay vi "khong biet".
+        "smile": avg("smile"),
         "motion": motion_of(win),
+        "shake": shake_of(win),
+        "action": action_of(win),
         "n_frame": n,
     }
 

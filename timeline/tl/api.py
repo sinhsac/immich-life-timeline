@@ -19,7 +19,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import db, people, projects, render, select, story, textdraw, thumbs
+from . import (db, music, people, projects, render, select, story, textdraw,
+               thumbs)
 from .settings import get
 
 router = APIRouter(prefix="/api")
@@ -103,8 +104,21 @@ def progress():
 def defaults():
     return {"filters": select.DEFAULTS, "render": render.DEFAULT_OPTIONS,
             "max_frames": get().max_frames,
+            "music": music.available(get()),
             "story": {**story.describe(), "text_backend": textdraw.backend(),
                       "unicode_text": textdraw.unicode_ok()}}
+
+
+@router.get("/music")
+def list_music():
+    """Cac ban nhac trong MUSIC_DIR. Rong nghia la chua cau hinh MUSIC_DIR.
+
+    'name' la thu gui lai trong render options: {"music": "cham/piano-01.mp3"}.
+    Chi tra ve duong dan TUONG DOI — duong dan tuyet doi tren server khong phai
+    viec cua client, va nhan lai duong dan tuyet doi tu client la mot lo hong.
+    """
+    s = get()
+    return {"configured": bool(s.music_dir), "music": music.available(s)}
 
 
 # ----------------------------------------------------------------- buoc 1

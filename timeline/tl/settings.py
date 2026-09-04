@@ -47,6 +47,16 @@ class Settings:
     # ---- Thu muc ghi: thumbnail cache, frame, video ----
     work_dir: str = field(default_factory=lambda: _s("WORK_DIR", "/work"))
 
+    # ---- Nhac nen ----
+    # Mot thu muc chua san vai ban nhac, mount read-only. De trong = tat han
+    # tinh nang nhac nen.
+    #
+    # Vi sao can nhac: anh tinh khong co tieng, doan video thi co. Hai doan video
+    # cach nhau boi bon buc anh la nam giay im lang roi tieng ap vao — J-cut/L-cut
+    # chi lam mem hai mep, khong lap duoc khoang trong. Nhac la thu giu mach am
+    # lien tuc; beat-sync chi la phan them tren do.
+    music_dir: str = field(default_factory=lambda: _s("MUSIC_DIR", ""))
+
     # ---- ffmpeg ----
     ffmpeg: str = field(default_factory=lambda: _s("FFMPEG", "ffmpeg"))
     # ffprobe di kem ffmpeg. Dung de biet doan video co track tieng khong —
@@ -85,6 +95,10 @@ class Settings:
         return self.work / "cache"
 
     @property
+    def music(self):
+        return Path(self.music_dir) if self.music_dir else None
+
+    @property
     def media_src(self):
         if self.media_root:
             return f"file {self.media_root}"
@@ -119,6 +133,7 @@ class Settings:
                 f"  prefix={self.prefix}\n"
                 f"anh    {self.media_src}\n"
                 f"work   {self.work_dir}\n"
+                f"nhac   {self.music_dir or '(tat)'}\n"
                 f"ffmpeg {self.ffmpeg} threads={self.ffmpeg_threads}\n"
                 f"auth   {'token' if self.api_token else 'MO - khong co xac thuc'}")
 

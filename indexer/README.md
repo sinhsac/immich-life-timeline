@@ -15,7 +15,11 @@ be deployed as a Job/CronJob on k3s, on the same node as Immich.
 | 2 `faces` | Copy bbox + embedding + already-assigned person | — | `fp_face` |
 | 3 `landmarks` | 68 3D points → yaw/pitch/roll, EAR, age, quality metrics | `buffalo_l` / 1k3d68 + genderage | `fp_face` |
 | 4 `bodies` | Detect people + 17 COCO keypoints → posture, orientation, torso angle | `yolov8n-pose.onnx` | `fp_body` |
-| 5 `clips` | Scan video frames, find people, cut out the best clip | `det_10g` + `w600k_r50` | `fp_vface`, `fp_vclip` |
+| 5 `clips` | Scan video frames, index **every** face + body found, cut out the best clip | `det_10g` + `w600k_r50` (+ `1k3d68`, `yolov8n-pose`) | `fp_vface`, `fp_vbody`, `fp_vclip` |
+| — `rematch` | Re-assign people from **stored** vectors and re-cut clips. No decoding, no models | — | `fp_vface`, `fp_vclip` |
+
+`rematch` is not part of `all`; call it by name. It only has work to do after person
+names change in Immich.
 
 For **photos**, stage 2 gets bbox + embedding straight from Immich, which lets us
 skip SCRFD and ArcFace — the two most expensive models.
@@ -49,18 +53,50 @@ everything and throw most of it away" costing 1. No seeking to jump ahead: with
 B-frame codecs, a seek has to re-decode from the nearest keyframe, so reading
 sequentially is actually faster.
 
-**2. Assign people.** Every detected face is compared by cosine similarity against
-each person's centroid vector (computed from `fp_face.emb`). Two conditions, not
-one: `sim ≥ VIDEO_SIM` **and** at least `VIDEO_MARGIN` ahead of the runner-up
-person. Relatives who look alike hit 0.43–0.45 on a real library, so a single
-absolute threshold amounts to guessing.
+**2. Index every face, then assign people.** Every detected face is compared by
+cosine similarity against each person's centroid vector (computed from
+`fp_face.emb`). Two conditions, not one: `sim ≥ VIDEO_SIM` **and** at least
+`VIDEO_MARGIN` ahead of the runner-up person. Relatives who look alike hit 0.43–0.45
+on a real library, so a single absolute threshold amounts to guessing.
 
-Head pose here does **not** use `1k3d68` — it's derived from the 5 points
-(`pose_from_kps5`): the angle of the line between the eyes gives an accurate `roll`,
-the nose offset from the midpoint of the eyes gives `yaw`, and where the nose sits
-between the eye line and the mouth line gives `pitch`. Those last two are estimates,
-good enough to filter and rank, not to measure. Running yet another model on every
-face of every frame would double the cost of the most expensive stage.
+Faces that match nothing are **still written** (`person_id` NULL). Dropping them, as
+an earlier version did, closes off the road ahead: someone not yet named in Immich —
+or someone entirely new — leaves no trace at all, so you can never ask "is this a new
+person?". Set `VIDEO_KEEP_UNMATCHED=0` for the old, smaller behaviour.
+
+Each face also carries a `track_id`: greedy IoU matching against the previous frame,
+numbered within one video. Not Kalman, no velocity model — at 2 frames/second a
+person has moved half a step between samples and any motion model is wrong. Grouping
+is all it's for; the clustering that decides "these 40 detections are one new person"
+works on embeddings, and `track_id` just cuts down the work.
+
+What gets stored per face, so a video never needs re-decoding:
+
+| Column | Why |
+|---|---|
+| `emb`, `emb_norm` | Cluster unknown faces or assign names later via SQL. Turn off with `VIDEO_STORE_EMB=0` |
+| `lmk68` | 68 points, needed to align the face when rendering — same as stills. `VIDEO_LMK68=0` to skip |
+| `age`, `ear`, `quality` | Same metrics as `fp_face`, so the two are comparable |
+| `track_id` | Group detections of one person within one video |
+
+With `VIDEO_LMK68=1` (default), `1k3d68` runs per face per frame, giving a real
+`pitch` plus `age` and `ear`. Turn it off and pose falls back to the 5-point estimate
+(`pose_from_kps5`): the angle between the eyes gives an accurate `roll`, the nose
+offset from the eye midpoint gives `yaw`, and where the nose sits between the eye and
+mouth lines gives `pitch`. Those last two are estimates — good enough to filter and
+rank, not to measure. The trade is real: it's another model run on every face of
+every frame, in the most expensive stage.
+
+**2b. Body pose.** With `DO_VBODY=1` (default) `yolov8n-pose` runs on the *same*
+decoded frame, writing 17 keypoints plus posture / orientation / torso angle to
+`fp_vbody` — the video counterpart of `fp_body`. It shares one decode pass on
+purpose: decoding video (and in HTTP mode downloading up to `VIDEO_MAX_MB` per file)
+dominates the cost, so a second pass would double the expensive part to save the
+cheap part. The price is three models resident at once, roughly 700MB.
+
+If the row count gets out of hand, `VIDEO_MIN_FACE_PX` is the knob: a crowd scene can
+produce dozens of 10px faces per frame that are useless but account for most of the
+rows. It's a threshold on eye-to-eye distance in pixels of the resized frame.
 
 **3. Slide a window.** Group frames into continuous runs (allowing the face to drop
 out for up to `VIDEO_GAP_MS`), then within each run try every window from
@@ -85,10 +121,11 @@ into nothing but crowd shots.
 
 Keep the `CLIP_PER_PERSON` best non-overlapping clips per person per video.
 
-**Requires `MEDIA_ROOT`.** The `IMMICH_URL` mode is not usable for this stage:
-downloading the entire video library over HTTP just to scan it makes no sense. It
-prefers reading `encodedVideoPath` (Immich's transcoded copy, usually H.264 mp4 —
-always decodable) and only falls back to `originalPath`.
+**Prefers `MEDIA_ROOT`.** It reads `encodedVideoPath` (Immich's transcoded copy,
+usually H.264 mp4 — always decodable) and falls back to `originalPath`. Without a
+mounted volume it can still download over HTTP, but `cv2.VideoCapture` needs a
+seekable local file, so the *whole* file comes down before scanning; `VIDEO_MAX_MB`
+(default 200) caps that.
 
 ## Why the two kinds of pose are separate
 
@@ -133,10 +170,17 @@ pip install -r requirements.txt
 python job.py --dry-run          # check pg + photos + video + models, write nothing
 python job.py                    # run all 5 stages in sequence
 python job.py --stage clips      # run a single stage
+python job.py --stage rematch    # re-assign people + re-cut clips, no decoding
 python job.py --reset clips      # rescan every video
 python job.py --stats            # show progress
 python job.py --reset errors     # retry photos that failed to read
 ```
+
+After naming a new person in Immich, run `--stage faces`, `--stage landmarks`, then
+`--stage rematch`. That reads the vectors already in `fp_vface`, assigns the new
+person, and re-cuts their clips — no video decoding and no models loaded. Before
+`emb` was stored this needed a full `--reset clips`, meaning hours of CPU to redo work
+that had just been done. `rematch` needs no `MEDIA_ROOT` at all.
 
 The job is **resumable**: state lives in the `face_state` / `body_state` /
 `clip_state` columns of `fp_asset`, committed in `BATCH_COMMIT` batches (the `clips`
@@ -147,7 +191,10 @@ the batch in flight — safe when k8s evicts it.
 `clips` is the most expensive stage. Rough estimate on a 4-core CPU: each sampled
 frame costs about 60–120ms for detection + recognition, so a 1-minute video at
 `VIDEO_FPS=2` is 120 frames ≈ 10–15 seconds. 500 one-minute videos is roughly
-1.5–2 hours. Setting `VIDEO_FPS=0` (every frame) multiplies that by the video's `fps`
+1.5–2 hours. `VIDEO_LMK68=1` and `DO_VBODY=1` each add to that, so budget closer to
+2–3× if you leave both on. Storage is roughly 0.5–1MB per minute of video with `emb`
+and `lmk68` stored at 2 fps. Setting `VIDEO_FPS=0` (every frame) multiplies both
+figures by the video's `fps`
 — only use it when you really need it. If you don't want video scanned at all, set
 `DO_VIDEO=0`.
 
@@ -186,8 +233,10 @@ k3s).
 
 The prefix defaults to `fp_`, change it with `TABLE_PREFIX`.
 
-**`fp_asset`** — one row per photo: `taken_at`, `date_src`, `preview_path`,
-`n_face`, `n_body`, `face_state`, `body_state`, `err`.
+**`fp_asset`** — one row per photo or video: `taken_at`, `date_src`, `preview_path`,
+`n_face`, `n_body`, `face_state`, `body_state`, `err`. For video also `video_path`,
+`dur_ms`, `clip_state`, and the counts from the scan: `n_vframe`, `n_vface`,
+`n_vbody`, `n_clip`.
 
 **`fp_face`** — one row per face:
 
@@ -203,11 +252,20 @@ The prefix defaults to `fp_`, change it with `TABLE_PREFIX`.
 - `torso_deg` torso angle relative to vertical, `body_front` 0..1
 - `face_fidx` matched to `fp_face.fidx` when a match is found
 
-**`fp_vface`** — one row per face **matched to a person** on each sampled frame of a
-video: `t_ms`, bbox (0..1), `kps`, `person_id`, `sim`, `sim2`,
-`n_face` (total faces in that frame), `yaw`, `roll`, `frontality`, `sharp`,
-`bright`, `symm`, `eye_ratio`. Faces of unknown people are not stored — nobody
-queries them, and storing everything would bloat the table for nothing.
+**`fp_vface`** — one row per face detected on each sampled frame of a video,
+**including faces that match no one** (`person_id` NULL):
+
+- Position: `t_ms`, bbox (0..1), `kps`, `lmk68`, `n_face` (total faces in that frame)
+- Identity: `person_id`, `person_name`, `sim`, `sim2`, `track_id`, `emb`, `emb_norm`
+- Metrics: `yaw`, `pitch`, `roll`, `frontality`, `sharp`, `bright`, `symm`,
+  `eye_ratio`, `ear`, `age`, `quality`
+
+Keeping the unmatched rows plus `emb` is what makes person discovery and `rematch`
+possible: identity is recomputed from stored vectors instead of from the video.
+
+**`fp_vbody`** — the video counterpart of `fp_body`: same columns plus `t_ms`, keyed
+on `(asset_id, t_ms, pidx)`. `face_fidx` matches `fp_vface.fidx` **at the same
+`t_ms`**.
 
 **`fp_vclip`** — one row per **selected clip**: `person_id`, `cidx` (0 = best),
 `t_start_ms`, `t_end_ms`, `score`, `sim`, `face_ratio`, `sharp`, `bright`,

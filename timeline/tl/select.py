@@ -29,17 +29,42 @@ MANUAL_REASON = "dropped by hand"
 # Nguong mac dinh, nham vao video hanh trinh mot nguoi tu be den lon.
 DEFAULTS = {
     # --- pose dau ---
-    "max_yaw": 22.0,          # quay trai/phai
+    # QUAN TRONG ve y nghia: voi soft_pose=True (mac dinh) thi day KHONG con la
+    # nguong loai, ma la DAU DOC — vuot qua thi bat dau bi tru diem, tang dan cho
+    # den hard_*. Chi hard_* moi loai thang.
+    #
+    # Vi sao doi: bo nguong cu loai thang o yaw 22 do, ma 22 do gan nhu van la
+    # nhin thang. Ket qua la anh dang cuoi ngoai dau lai, dang chay, dang thoi
+    # nen — nhung anh dep nhat cua mot doi nguoi — bi nem di truoc khi kip cham
+    # diem, va thu con lai la anh the voi selfie dung yen. Tru diem thi chung van
+    # canh tranh duoc, chi phai bu bang do net / do cuoi / mat to.
+    "soft_pose": True,
+    "max_yaw": 22.0,          # quay trai/phai: dau doc tru diem
     "max_pitch": 18.0,        # ngua/cui
     "max_roll": 20.0,         # nghieng dau
     "min_frontality": 0.45,   # 0..1 gop pose + doi xung
+    "hard_yaw": 55.0,         # qua muc nay thi khong con nhan ra nguoi -> loai
+    "hard_pitch": 42.0,
+    "hard_roll": 45.0,
+    "hard_frontality": 0.15,
     "min_ear": 0.15,          # loai anh nham mat
     # --- chat luong anh ---
     "min_eye_ratio": 0.030,   # mat cach nhau >= 3% canh dai: loai mat qua nho
-    "min_sharp": 60.0,
+    "min_sharp": 60.0,        # dau doc tru diem khi soft_pose=True
+    "hard_sharp": 18.0,       # duoi muc nay thi la ve nhoe, khong cuu duoc
     "bright_min": 45.0,
     "bright_max": 215.0,
     "min_quality": 0.0,
+    # --- bieu cam ---
+    # Diem nu cuoi tu lmk68 (fp_face.smile). min_smile=0 la khong loc gi; viec
+    # uu tien anh dang cuoi lam bang CONG DIEM, khong bang loai bo, vi mot buc
+    # anh trang nghiem dung cho cung la mot phan cua cau chuyen.
+    "min_smile": 0.0,
+    "prefer_smile": True,
+    # --- anh trung ---
+    # Anh chup lien nhau trong bao nhieu giay thi coi la CUNG MOT khoanh khac ->
+    # chi giu cai tot nhat. 0 = tat.
+    "dedup_seconds": 8.0,
     # --- nguoi khac trong anh ---
     "allow_others": True,     # cho phep anh co nguoi khac
     "max_faces": 0,           # 0 = khong gioi han so mat trong anh
@@ -81,6 +106,7 @@ SELECT c.asset_id,
        NULL::real AS eye_px, c.face_ratio AS eye_ratio,
        c.sharp, c.bright, NULL::real AS symm,
        c.score AS quality, NULL::real AS age,
+       {clip_smile},
        NULL::text AS posture, NULL::text AS orientation,
        NULL::real AS body_front, NULL::real AS torso_deg, NULL::real AS area_ratio,
        c.cidx, c.t_start_ms, c.t_end_ms, c.t_peak_ms, c.motion, c.sim, c.track,
@@ -106,6 +132,7 @@ SELECT f.asset_id, f.fidx, f.person_id, f.person_name,
        f.x1, f.y1, f.x2, f.y2,
        f.yaw, f.pitch, f.roll, f.frontality, f.ear,
        f.eye_px, f.eye_ratio, f.sharp, f.bright, f.symm, f.quality, f.age,
+       {face_smile},
        b.posture, b.orientation, b.body_front, b.torso_deg, b.area_ratio
 FROM {face} f
 JOIN {asset} a ON a.id = f.asset_id
@@ -141,6 +168,18 @@ def merge(filters):
     p = story.plan(out)
     for k in ("target_seconds", "pace", "chapter_by", "max_per_chapter"):
         out[k] = p[k]
+
+    # Dau doc phai nam TRUOC nguong loai, khong thi _ramp() nhan mot khoang am
+    # va diem tru chay nguoc: mot anh chinh dien bi tru nhieu hon anh quay 50 do.
+    # UI cho keo tu do hai thanh truot nen phai chan o day.
+    for knee, hard in (("max_yaw", "hard_yaw"), ("max_pitch", "hard_pitch"),
+                       ("max_roll", "hard_roll")):
+        out[hard] = max(float(out[hard]), float(out[knee]))
+    out["hard_frontality"] = min(float(out["hard_frontality"]),
+                                 float(out["min_frontality"]))
+    out["hard_sharp"] = min(float(out["hard_sharp"]), float(out["min_sharp"]))
+    out["dedup_seconds"] = max(0.0, min(120.0, float(out["dedup_seconds"])))
+    out["min_smile"] = max(0.0, min(1.0, float(out["min_smile"])))
     return out
 
 
@@ -195,17 +234,21 @@ def fetch(subjects, date_from=None, date_to=None, together=False,
     owner = {pid: gi for gi, g in enumerate(grps) for pid in g}
 
     s = get()
-    sql = _FETCH.format(face=s.table("face"), asset=s.table("asset"),
-                        body=s.table("body"))
     args = (flat, date_from, date_from, date_to, date_to)
     with rows() as (c, cur):
-        cur.execute(sql, args)
+        cur.execute(_FETCH.format(
+            face=s.table("face"), asset=s.table("asset"),
+            body=s.table("body"),
+            face_smile=("f.smile" if _has_col(cur, s, "face", "smile")
+                        else "NULL::real AS smile")), args)
         got = [dict(r) for r in cur.fetchall()]
         clips = []
         if use_clips and _has_clips(cur, s):
             cur.execute(_FETCH_CLIP.format(
                 vclip=s.table("vclip"), asset=s.table("asset"),
-                face=s.table("face")), args)
+                face=s.table("face"),
+                clip_smile=("c.smile" if _has_col(cur, s, "vclip", "smile")
+                            else "NULL::real AS smile")), args)
             clips = [dict(r) for r in cur.fetchall()]
         c.rollback()
 
@@ -242,6 +285,31 @@ def _has_clips(cur, s):
         (s.pg_schema, f"{s.prefix}vclip"))
     _clip_tbl.update(at=time.time(), ok=cur.fetchone() is not None)
     return _clip_tbl["ok"]
+
+
+_cols = {}
+
+
+def _has_col(cur, s, table, col):
+    """Cot `col` co ton tai trong bang cua job chua? Cache 60s.
+
+    Service nay va indexer la HAI container deploy rieng, nen luon co giai doan
+    lech phien ban. Deploy timeline moi truoc khi indexer chay migration thi
+    'f.smile' lam ca man hinh chon anh tra ve 500. Do mot lan roi thay bang
+    NULL::real thi chi mat mot chi so, khong sap.
+    """
+    import time
+    key = (table, col)
+    hit = _cols.get(key)
+    if hit and time.time() - hit[0] < 60.0:
+        return hit[1]
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+        (s.pg_schema, f"{s.prefix}{table}", col))
+    ok = cur.fetchone() is not None
+    _cols[key] = (time.time(), ok)
+    return ok
 
 
 def _one_per_asset(rows_, n_groups, together):
@@ -288,16 +356,27 @@ def _reject(r, f):
     # TOT NHAT (chinh dien tuyet doi), nhung 0.0 la falsy nen se bien thanh 999
     # va bi loai. None moi la "chua tinh duoc" va moi dang bi loai.
     yaw, pitch, roll = (_ang(r["yaw"]), _ang(r["pitch"]), _ang(r["roll"]))
-    if yaw > f["max_yaw"]:
-        return f"head turned {yaw:.0f}\u00b0 > {f['max_yaw']:.0f}\u00b0"
-    if pitch > f["max_pitch"]:
-        return f"tilted up/down {pitch:.0f}\u00b0 > {f['max_pitch']:.0f}\u00b0"
-    if roll > f["max_roll"]:
-        return f"head tilted sideways {roll:.0f}\u00b0 > {f['max_roll']:.0f}\u00b0"
+    # soft_pose: cac nguong max_* thanh dau doc tru diem trong _score(), o day
+    # chi con hard_* loai thang. Tat soft_pose thi ve dung hanh vi cu.
+    soft = bool(f.get("soft_pose", True))
+    lim_yaw = f["hard_yaw"] if soft else f["max_yaw"]
+    lim_pitch = f["hard_pitch"] if soft else f["max_pitch"]
+    lim_roll = f["hard_roll"] if soft else f["max_roll"]
+    if yaw > lim_yaw:
+        return f"head turned {yaw:.0f}\u00b0 > {lim_yaw:.0f}\u00b0"
+    if pitch > lim_pitch:
+        return f"tilted up/down {pitch:.0f}\u00b0 > {lim_pitch:.0f}\u00b0"
+    if roll > lim_roll:
+        return f"head tilted sideways {roll:.0f}\u00b0 > {lim_roll:.0f}\u00b0"
 
     fr = r["frontality"]
-    if fr is not None and fr < f["min_frontality"]:
-        return f"not frontal enough {fr:.2f} < {f['min_frontality']:.2f}"
+    lim_fr = f["hard_frontality"] if soft else f["min_frontality"]
+    if fr is not None and fr < lim_fr:
+        return f"not frontal enough {fr:.2f} < {lim_fr:.2f}"
+
+    sm = r.get("smile")
+    if sm is not None and f["min_smile"] > 0 and sm < f["min_smile"]:
+        return f"not smiling enough ({sm:.2f} < {f['min_smile']:.2f})"
 
     ear = r["ear"]
     if ear is not None and f["min_ear"] > 0 and ear < f["min_ear"]:
@@ -308,8 +387,9 @@ def _reject(r, f):
         return f"face too small in the photo ({er * 100:.1f}%)"
 
     sh = r["sharp"]
-    if sh is not None and sh < f["min_sharp"]:
-        return f"blurry (sharpness {sh:.0f} < {f['min_sharp']:.0f})"
+    lim_sh = f["hard_sharp"] if soft else f["min_sharp"]
+    if sh is not None and sh < lim_sh:
+        return f"blurry (sharpness {sh:.0f} < {lim_sh:.0f})"
 
     br = r["bright"]
     if br is not None and not (f["bright_min"] <= br <= f["bright_max"]):
@@ -361,21 +441,145 @@ def _reject_clip(r, f):
     return None
 
 
-def _score(r):
+# Diem NAY khac han fp_face.quality cua indexer, va tach ra la co y:
+#   quality  do MAT SACH KY THUAT. Con duoc dung lam moc chon vector dai dien
+#            cho mot person (PersonIndex sap theo quality DESC), nen sua no la
+#            sua ca hanh vi nhan dang.
+#   _score   do DO DANG CHON CHO VIDEO. Tu do them duoc nu cuoi va tru diem pose
+#            ma khong dung gi den nhan dang.
+W_SMILE = 22.0        # tren thang ~120 diem cua quality
+W_CLIP = 8.0
+# Tru toi da khi cham hard_*. Tong 68 diem: du de mot anh quay 55 do thua mot anh
+# chinh dien tuong duong, nhung khong du de xoa so no neu no net va dang cuoi.
+PEN = {"yaw": 18.0, "pitch": 12.0, "roll": 8.0, "frontality": 14.0,
+       "sharp": 16.0}
+
+
+def _ramp(v, knee, hard, weight):
+    """0 khi v con trong dau doc, tang deu den `weight` khi v cham hard.
+
+    Dung cho ca hai chieu: knee < hard (goc, cang lon cang xau) va knee > hard
+    (do net, cang nho cang xau).
+    """
+    if v is None or weight <= 0:
+        return 0.0
+    span = hard - knee
+    if abs(span) < 1e-9:
+        return 0.0
+    return weight * max(0.0, min(1.0, (float(v) - knee) / span))
+
+
+def _score(r, f=None):
     """Diem de xep hang trong cung mot o thoi gian.
+
+    Ba thanh phan:
+      1. quality tu indexer (hoac tinh tam neu thieu)
+      2. CONG diem nu cuoi — thu gan nhat voi "khoanh khac" ma bo chi so nay do
+         duoc, va la ly do chinh de doi tu loai thang sang tru diem
+      3. TRU diem pose/do net khi vuot dau doc, thay cho viec loai thang
 
     Doan video duoc cong mot khoan nho: mot doan dong dang gia hon mot buc anh
     tinh o cung diem chat luong, va no la thu bien video thanh "co cau chuyen"
     chu khong phai bang anh. It thoi, de khong bien video thanh toan clip.
+
+    Doc dong bang .get() chu khong bang r[...]: ham nay duoc goi tren nhung dong
+    chua di qua query day du (vd _one_per_asset chi can xep hang cac mat trong
+    cung mot anh), va mot KeyError o day lam sap ca man hinh chon anh.
     """
-    if r["quality"] is not None:
+    f = f or DEFAULTS
+    if r.get("quality") is not None:
         q = float(r["quality"])
     else:
-        fr = r["frontality"] or 0.0
-        sh = min((r["sharp"] or 0.0) / 400.0, 1.0)
-        er = min((r["eye_ratio"] or 0.0) / 0.12, 1.0)
+        fr = r.get("frontality") or 0.0
+        sh = min((r.get("sharp") or 0.0) / 400.0, 1.0)
+        er = min((r.get("eye_ratio") or 0.0) / 0.12, 1.0)
         q = 40.0 * fr + 25.0 * sh + 25.0 * er
-    return q + (8.0 if r.get("kind") == "clip" else 0.0)
+
+    sm = r.get("smile")
+    if sm is not None and f.get("prefer_smile", True):
+        q += W_SMILE * max(0.0, min(1.0, float(sm)))
+
+    if f.get("soft_pose", True):
+        q -= _ramp(_ang_or_none(r.get("yaw")), f["max_yaw"], f["hard_yaw"],
+                   PEN["yaw"])
+        q -= _ramp(_ang_or_none(r.get("pitch")), f["max_pitch"],
+                   f["hard_pitch"], PEN["pitch"])
+        q -= _ramp(_ang_or_none(r.get("roll")), f["max_roll"], f["hard_roll"],
+                   PEN["roll"])
+        q -= _ramp(r.get("frontality"), f["min_frontality"],
+                   f["hard_frontality"], PEN["frontality"])
+        q -= _ramp(r.get("sharp"), f["min_sharp"], f["hard_sharp"],
+                   PEN["sharp"])
+
+    return q + (W_CLIP if r.get("kind") == "clip" else 0.0)
+
+
+def _ang_or_none(v):
+    """Goc tuyet doi, hoac None. Khac _ang(): khong bien None thanh 999.
+
+    Trong _reject thi None phai bi loai nen 999 la dung. Trong cham diem thi
+    999 se tru het diem cua moi doan video (yaw cua clip la 0 that, nhung anh
+    chua co landmark thi None) — sai han y nghia.
+    """
+    return None if v is None else abs(float(v))
+
+
+# Mot chum khong duoc dai qua muc nay, tinh theo boi so cua dedup_seconds. Khong
+# co tran thi 50 anh cach nhau deu 5 giay se noi thanh MOT chum dai 4 phut va bi
+# rut ve mot anh — do la ca mot buoi, khong phai mot khoanh khac.
+BURST_SPAN = 3.0
+
+
+def _dedup_bursts(rows_, seconds):
+    """Anh chup lien nhau -> cung mot khoanh khac -> chi giu cai tot nhat.
+
+    Tra ve (giu, bo). `seconds` = 0 thi khong lam gi.
+
+    CHI ap dung cho ANH TINH. Moi doan cat ra tu cung mot video deu co chung
+    taken_at cua video do, nen gom theo thoi gian se nhap het chung thanh mot —
+    trong khi best_windows() cua indexer da bao dam cac doan khong chong nhau,
+    tuc chung la nhung khoanh khac khac nhau that.
+
+    VI SAO KHONG dung cosine cua fp_face.emb: do la vector NHAN DANG. Hai anh
+    cua cung mot nguoi cach nhau nam nam van cho cosine cao — do dung la muc dich
+    cua no. Dung no de tim anh trung se loai oan anh khac canh hoan toan. Tin
+    hieu dung cho "trung canh" la CLIP embedding cua Immich (bang smart_search),
+    khong phai embedding khuon mat.
+    """
+    if not seconds or seconds <= 0:
+        return rows_, []
+    imgs = [r for r in rows_ if r.get("kind") != "clip"]
+    others = [r for r in rows_ if r.get("kind") == "clip"]
+    if len(imgs) < 2:
+        return rows_, []
+
+    imgs.sort(key=lambda r: _ts(r["taken_at"]))
+    span_cap = float(seconds) * BURST_SPAN
+    keep, drop = [], []
+    burst = [imgs[0]]
+    for r in imgs[1:]:
+        t, t_prev, t0 = (_ts(r["taken_at"]), _ts(burst[-1]["taken_at"]),
+                         _ts(burst[0]["taken_at"]))
+        if (t - t_prev) <= seconds and (t - t0) <= span_cap:
+            burst.append(r)
+            continue
+        keep.append(_best_of(burst, drop))
+        burst = [r]
+    keep.append(_best_of(burst, drop))
+
+    out = keep + others
+    out.sort(key=lambda r: (_ts(r["taken_at"]), str(r["asset_id"]),
+                            int(r["fidx"])))
+    return out, drop
+
+
+def _best_of(burst, drop):
+    """Anh tot nhat cua mot chum; phan con lai day vao `drop`."""
+    if len(burst) == 1:
+        return burst[0]
+    best = max(burst, key=lambda r: float(r.get("score") or 0.0))
+    drop.extend(r for r in burst if r is not best)
+    return best
 
 
 def apply(cands, filters, excluded=None):
@@ -393,12 +597,22 @@ def apply(cands, filters, excluded=None):
             continue
         why = _reject(r, f)
         if why:
-            r = dict(r, reason=why, score=_score(r))
+            r = dict(r, reason=why, score=_score(r, f))
             rejected.append(r)
             head = why.split("(")[0].split(">")[0].strip()
             reasons[head] = reasons.get(head, 0) + 1
         else:
-            passed.append(dict(r, reason=None, score=_score(r)))
+            passed.append(dict(r, reason=None, score=_score(r, f)))
+
+    # Gop chum anh cung mot khoanh khac TRUOC khi chia chuong: lam sau thi cac
+    # o thoi gian da bi tieu ton vao nhung anh gan trung nhau.
+    passed, bursts = _dedup_bursts(passed, f["dedup_seconds"])
+    if bursts:
+        head = "another shot from the same burst is better"
+        for r in bursts:
+            r["reason"] = head
+        rejected.extend(bursts)
+        reasons[head] = reasons.get(head, 0) + len(bursts)
 
     s = get()
     if f["mode"] == "story":

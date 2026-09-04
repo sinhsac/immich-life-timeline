@@ -450,7 +450,58 @@ def estimate(n_hero, n_beat, p):
 
 
 # ---------------------------------------------------------------- storyboard
-def storyboard(frames, o):
+def snap_beats(shots, beats, fps, min_frames=2):
+    """Ep bien giua cac shot roi dung vao phach nhac. Sua 'hold' tai cho.
+
+    Tra ve so shot da bat duoc vao nhip.
+
+    Y tuong: khong bo cau truc hero/beat da co, chi DOI DON VI. Do dai tu nhien
+    cua mot shot (hold_hero / hold_beat / do dai doan video) tro thanh "muc nham",
+    roi bien that duoc keo ve phach gan nhat. Nhac nhanh thi mot shot an it phach
+    -> canh cat don dap; nhac cham thi nguoc lai. Chuong va anh chu dao van con
+    nguyen, chi la moi cu cat roi dung tieng trong.
+
+    Doan video duoc xu ly KHAC anh tinh: chi keo XUONG phach truoc do, khong keo
+    len. Keo len nghia la doi frame ma doan khong co — _ClipSrc se giu frame cuoi
+    va nguoi xem thay hinh dung lai giua mot canh dang chuyen dong.
+    """
+    if not beats or not shots or fps <= 0:
+        return 0
+    grid = sorted({int(round(float(t) * fps)) for t in beats
+                   if t is not None and float(t) >= 0})
+    grid = [g for g in grid if g > 0]
+    if len(grid) < 2:
+        return 0
+
+    pos, gi, n_snap = 0, 0, 0
+    for sh in shots:
+        nat = int(sh["hold"])
+        want = pos + nat
+        cands = []
+        j = gi
+        while j < len(grid):
+            if grid[j] - pos >= min_frames:
+                cands.append(j)
+                if grid[j] > want:
+                    break
+            j += 1
+        if not cands:
+            pos += nat                  # het luoi phach -> giu do dai tu nhien
+            continue
+        if sh.get("kind") == "clip":
+            below = [c for c in cands if grid[c] <= want]
+            pick = below[-1] if below else cands[0]
+        else:
+            pick = min(cands, key=lambda c: abs(grid[c] - want))
+        sh["hold"] = grid[pick] - pos
+        sh["beat"] = True
+        pos = grid[pick]
+        gi = pick + 1
+        n_snap += 1
+    return n_snap
+
+
+def storyboard(frames, o, beats=None):
     """Danh sach shot kem so frame chinh xac, cho buoc render.
 
     Mot 'shot' = mot buc anh nam tren man hinh trong hold frame, roi chong mo
@@ -459,6 +510,9 @@ def storyboard(frames, o):
 
         shot i chiem  [start_i, start_i + hold_i + xout_i)
         start_(i+1) = start_i + hold_i          <- chong nhau dung xout_i frame
+
+    beats: moc phach cua ban nhac (giay). Co thi bien shot bi keo ve phach gan
+    nhat — xem snap_beats(). None thi nhip lay tu bang PACE nhu cu.
     """
     fps = max(6, min(60, int(o.get("out_fps") or 24)))
     p = plan(o)
@@ -526,6 +580,10 @@ def storyboard(frames, o):
             "hold": int(hold), "zoom_from": z0, "zoom_to": z1,
         })
 
+    # Bat vao nhip TRUOC khi tinh xfade va start: hold doi thi ca hai phai tinh
+    # lai theo, khong thi bien shot lech dung bang phan da sua.
+    n_beat_snap = snap_beats(shots, beats, fps) if beats else 0
+
     # chuyen canh: chi chong mo giua hai shot khi ca hai du dai
     for i, sh in enumerate(shots):
         nxt = shots[i + 1] if i + 1 < len(shots) else None
@@ -557,6 +615,7 @@ def storyboard(frames, o):
         "f_title": f_title, "chapters": chapters,
         "n_clip": sum(1 for s in shots if s["kind"] == "clip"),
         "pace": p["pace"], "target_seconds": p["target_seconds"],
+        "n_beat_snap": n_beat_snap,
     }
 
 

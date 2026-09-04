@@ -30,6 +30,11 @@ from idx.media import MediaReader
 RUN_ID = logfmt.install("fp-indexer")
 
 STAGES = ("assets", "faces", "landmarks", "bodies", "clips")
+# Stage goi ten ro rang moi chay, KHONG nam trong 'all'. rematch chi co viec lam
+# sau khi ten nguoi trong Immich thay doi, va no doc lai fp_vface chu khong quet
+# video — cho vao 'all' thi moi lan chay deu lam lai mot viec vua lam xong.
+EXTRA_STAGES = ("rematch", "smiles")
+ALL_STAGES = STAGES + EXTRA_STAGES
 
 
 def _on_signal(signum, _frame):
@@ -47,8 +52,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="job.py", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--stage", action="append", choices=STAGES + ("all",),
-                    help="chay rieng mot stage, lap lai duoc. Mac dinh: all")
+    ap.add_argument("--stage", action="append", choices=ALL_STAGES + ("all",),
+                    help="chay rieng mot stage, lap lai duoc. Mac dinh: all "
+                         "(khong gom rematch)")
     ap.add_argument("--stats", action="store_true", help="chi in tinh trang")
     ap.add_argument("--reset", choices=("faces", "landmarks", "bodies", "clips",
                                         "errors", "all"),
@@ -90,12 +96,16 @@ def main(argv=None):
             return 0
 
         want = a.stage or ["all"]
-        todo = list(STAGES) if "all" in want else [x for x in STAGES if x in want]
+        todo = (list(STAGES) if "all" in want
+                else [x for x in ALL_STAGES if x in want])
 
         if a.dry_run:
             return _dry_run(conn, s, t, todo)
 
-        s.require_media()
+        # rematch/smiles khong doc anh hay video nao -> khong doi hoi nguon media.
+        # Chay duoc tren mot container khong mount volume gi ca.
+        if any(x not in ("rematch", "smiles") for x in todo):
+            s.require_media()
         media = MediaReader(s)
         t0 = time.time()
         for name in todo:
@@ -113,6 +123,10 @@ def main(argv=None):
                 stages.bodies(conn, s, t, media)
             elif name == "clips":
                 stages.clips(conn, s, t, media)
+            elif name == "rematch":
+                stages.rematch(conn, s)
+            elif name == "smiles":
+                stages.smiles(conn, s)
         print(f"\n{media.stats()}")
         print(f"tong thoi gian {(time.time() - t0) / 60:.1f} phut\n")
         _head("tinh trang")
@@ -196,11 +210,35 @@ def _dry_video(conn, s, t, media):
     except SystemExit as e:
         print(f"  [LOI] {e}")
         return False
+    if s.video_lmk68:
+        try:
+            from idx.facemodel import FaceLandmarker
+            fl = FaceLandmarker(s)
+            fl.close()
+            print("  [ok] VIDEO_LMK68=1: 1k3d68 load duoc cho frame video")
+        except SystemExit as e:
+            print(f"  [LOI] {e}")
+            ok = False
+    if s.do_vbody:
+        try:
+            from idx.bodymodel import BodyPose
+            bp = BodyPose(s)
+            bp.close()
+            print("  [ok] DO_VBODY=1: body pose load duoc cho frame video")
+        except SystemExit as e:
+            print(f"  [LOI] {e}")
+            ok = False
     n = len(PersonIndex(conn, s))
     if n:
         print(f"  [ok] {n} person co vector trung tam de gan ten cho mat video")
+    elif s.video_keep_unmatched:
+        # Khong con la loi: quet van sinh ra emb + track cho mat chua biet la ai,
+        # va do la du lieu de phat hien person moi. Chi chua cat duoc doan nao.
+        print("  [--] chua co person nao co embedding -> se quet va luu mat "
+              "nhung person_id NULL het, chua cat duoc doan")
     else:
-        print("  [LOI] chua co person nao co embedding -> chay faces + landmarks truoc")
+        print("  [LOI] chua co person nao co embedding, va VIDEO_KEEP_UNMATCHED=0 "
+              "-> chay faces + landmarks truoc")
         ok = False
 
     with conn.cursor() as cur:

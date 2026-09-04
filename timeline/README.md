@@ -185,6 +185,83 @@ silent video intact — instead of losing the video altogether. Clips with no au
 track are removed from the plan using `ffprobe`: one input without audio makes the
 whole `filter_complex` fail, taking the audio of every other segment with it.
 
+## Background music, and why it is structural
+
+Photos are silent, video segments are not. Two segments separated by four photos
+means five seconds of silence and then sound slamming back in. `audio_lead` and
+`audio_tail` soften the two edges; they cannot fill the hole in between. Music is
+what holds a continuous bed of sound under the whole thing — that is a structural
+fix, not decoration, and it is the reason to add it before anything to do with
+beats.
+
+Point `MUSIC_DIR` at a directory of tracks (mounted read-only), then pass the
+track name when rendering. `GET /api/music` lists what is there. The name is
+always **relative** to `MUSIC_DIR`; `tl/music.py` rejects absolute paths, `..`
+segments, and anything that resolves outside the directory after symlinks — the
+name comes from the client and ends up on an ffmpeg command line.
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `music` | null | Track name relative to `MUSIC_DIR`. Unresolvable → rendered silent, not an error |
+| `music_gain` | -14 dB | Music is a bed, not the subject |
+| `music_duck` | -11 dB | How far music drops while real segment audio plays |
+| `music_fade_in` / `music_fade_out` | 1.2 / 2.5 | |
+| `music_loop` | true | Track shorter than the video repeats, via `-stream_loop` |
+
+**Ducking is computed, not compressed.** The textbook tool is
+`sidechaincompress`, but here the exact seconds where real audio plays are already
+known — `audio_plan()` works them out before ffmpeg is ever called. So the
+envelope is built directly as a `volume` expression: a trapezoid per interval
+ramping over `DUCK_RAMP` (0.6s), combined with `max()` so two nearby intervals do
+not stack into a double drop. A compressor has to infer all of that from signal
+amplitude, and the amount it ducks depends on threshold and ratio, so "drop by
+exactly 11 dB" is not something you can ask it for. The computed envelope is
+exact, identical between runs, and checkable with a few lines of Python.
+
+Intervals are merged when they are closer than `2 × DUCK_RAMP`, and merged harder
+until there are at most 40 of them — ffmpeg evaluates that expression on every
+audio frame.
+
+## Cutting on the beat
+
+`beat_sync: true` (requires `music`) snaps shot boundaries onto the beat grid.
+
+It does **not** replace the hero/beat structure — it changes the *unit*. Each
+shot's natural length (`hold_hero`, `hold_beat`, or a segment's own duration) is
+kept as the target, and the real boundary is pulled to the nearest beat. Fast
+music gives quick cuts, slow music gives long ones, and chapters and hero shots
+survive intact. Expect the duration to drift a little from the estimate; that is
+inherent to snapping.
+
+`beat_every: 2` cuts every second beat — at 140 BPM a single beat is 0.43s, too
+fast for a memory video.
+
+Video segments are only ever snapped **down** to the previous beat, never up.
+Snapping up would ask for frames the segment does not have, and `_ClipSrc` holds
+the last frame instead — a freeze in the middle of a moving shot.
+
+Beat detection has two paths, same output either way:
+
+- **librosa**, if installed. Its beat tracker follows tempo changes within a track
+  using dynamic programming, which the fallback cannot.
+- **numpy + ffmpeg** otherwise, which is what ships. Spectral flux → autocorrelation
+  for tempo → best phase offset. Assumes tempo is roughly constant, true for most
+  background music.
+
+librosa is not a hard dependency because it drags in numba, scipy and soundfile —
+heavier than the rest of this service put together, on a box already shared with
+Immich. `pip install librosa` and it gets used automatically.
+
+Known limitation of the fallback: **octave errors.** On a synthetic 120 BPM click
+track it reports 60 BPM — a real ambiguity in tempo estimation, not a bug in the
+arithmetic. Cuts still land on beats, just every second one. `beat_every`
+compensates, and librosa mostly avoids it. Tracks with no clear pulse (free piano,
+rain, spoken word) return no beats at all, and rendering falls back to normal
+storytelling pacing.
+
+Grids are cached per (file, mtime): a track's beats never change, and detection
+decodes the whole file and runs an FFT.
+
 Expert mode brings back the four steps:
 
 1. **Select person** — pick several clusters of the same person, with suggestions to widen the net
@@ -352,22 +429,73 @@ own. Remove the cookie and turning the token on gets you the page as bare HTML.
 
 ## Filter thresholds
 
-Head pose group (from `1k3d68`):
+### Pose is scored, not gated
+
+With `soft_pose` on (the default), the pose and sharpness numbers below are
+**knees, not walls**: cross one and the photo starts losing points, on a ramp up
+to the matching `hard_*` limit. Only the `hard_*` limits actually reject.
+
+This changed because the old behaviour cut at `max_yaw = 22°`, and 22° is still
+very nearly looking straight at the lens. Photos of someone grinning back over
+their shoulder, mid-run, blowing out candles — often the best photos anyone owns
+— were thrown out before they were ever scored, and what survived was passport
+shots and static selfies. Scoring lets them compete: they just have to make up
+the deficit with sharpness, face size, or a smile.
+
+Set `soft_pose: false` for the old cut-hard behaviour.
+
+| Threshold | Knee | Hard | Meaning |
+|---|---|---|---|
+| `max_yaw` / `hard_yaw` | 22° | 55° | Turned left/right |
+| `max_pitch` / `hard_pitch` | 18° | 42° | Tilted up/down |
+| `max_roll` / `hard_roll` | 20° | 45° | Head tilted sideways |
+| `min_frontality` / `hard_frontality` | 0.45 | 0.15 | Head pose + symmetry, 0..1 |
+| `min_sharp` / `hard_sharp` | 60 | 18 | Laplacian variance on a 128px crop |
+| `min_ear` | 0.15 | — | Rejects closed eyes. Still a hard gate |
+
+Maximum deductions: yaw 18, frontality 14, sharpness 16, pitch 12, roll 8 — on
+the roughly 120-point quality scale.
+
+### Smiling
+
+`fp_face.smile` is a 0..1 score derived from the 68 landmarks already stored —
+mouth-corner lift, mouth width against interocular distance, and lip opening. No
+new model, and no re-scan: `job.py --stage smiles` fills the column from the
+`lmk68` blobs already in the database.
+
+It is worth its own row because everything else here measures a *technically
+clean face*, and nothing measured whether the moment was worth keeping. A smile
+is the closest thing to "a moment" this metric set can reach.
 
 | Threshold | Default | Meaning |
 |---|---|---|
-| `max_yaw` | 22° | Turned left/right |
-| `max_pitch` | 18° | Tilted up/down |
-| `max_roll` | 20° | Head tilted sideways |
-| `min_frontality` | 0.45 | Combines head pose + symmetry, 0..1 |
-| `min_ear` | 0.15 | Rejects photos with closed eyes |
+| `prefer_smile` | true | Adds up to 22 points for a smile |
+| `min_smile` | 0.0 | Hard gate, 0 = off. A solemn portrait is part of the story too |
 
-Image quality group:
+A photo turned 35° with a 0.9 smile now outscores a dead-straight, unsmiling one.
+That is the intended change.
+
+### Duplicate shots
+
+| Threshold | Default | Meaning |
+|---|---|---|
+| `dedup_seconds` | 8.0 | Photos this close together are one moment — keep the best. 0 = off |
+
+Bursts collapse; a burst is capped at 3× `dedup_seconds` so a whole afternoon of
+photos taken 5s apart does not shrink to one frame. Video segments are never
+collapsed: every segment from one video shares the video's `taken_at`, and the
+indexer has already guaranteed they do not overlap.
+
+This deliberately does **not** use cosine distance on `fp_face.emb`. That is an
+*identity* vector — two photos of the same person five years apart still score
+high, which is exactly what it is for. The right signal for "same scene" is
+Immich's CLIP embedding in the `smart_search` table, which this does not read yet.
+
+### Image quality
 
 | Threshold | Default | Meaning |
 |---|---|---|
 | `min_eye_ratio` | 0.030 | Eyes at least 3% of the long edge apart — rejects faces that are too small |
-| `min_sharp` | 60 | Laplacian variance on a 128px crop |
 | `bright_min/max` | 45 / 215 | Rejects blown-out or too-dark photos |
 
 Other people in the photo group:

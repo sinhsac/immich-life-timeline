@@ -96,6 +96,36 @@ class Settings:
     # than co net giong nhau.
     video_margin: float = field(default_factory=lambda: _f("VIDEO_MARGIN", 0.04))
     video_centroid_per: int = field(default_factory=lambda: _i("VIDEO_CENTROID_PER", 24))
+
+    # ---- Do day cua du lieu video ----
+    # Giu ca mat KHONG khop person nao. Tat di thi bang gon hon nhieu, nhung
+    # nguoi chua gan ten trong Immich va nguoi hoan toan moi se khong de lai dau
+    # vet gi — tuc la tu bo kha nang phat hien person moi tu video.
+    video_keep_unmatched: bool = field(
+        default_factory=lambda: _b("VIDEO_KEEP_UNMATCHED", True))
+    # Luu vector ArcFace vao fp_vface. 512 float32 = 2KB/dong. O muc lay mau 2
+    # frame/s day la khoang 0.5-1MB moi phut video, doi lay viec khong bao gio
+    # phai quet lai de gom cum hay gan ten.
+    video_store_emb: bool = field(
+        default_factory=lambda: _b("VIDEO_STORE_EMB", True))
+    # Chay 1k3d68 cho tung mat trong frame -> lmk68 + pitch that + age + ear.
+    # Khong co lmk68 thi frame video khong align duoc ngang voi anh tinh.
+    # Doi lai: them mot lan infer moi mat moi frame. Tat di van co yaw/pitch/roll
+    # uoc luong tu 5 diem (pose_from_kps5), chi kem chinh xac hon.
+    video_lmk68: bool = field(default_factory=lambda: _b("VIDEO_LMK68", True))
+    # Body pose (yolov8n-pose) tren frame video -> fp_vbody.
+    do_vbody: bool = field(default_factory=lambda: _b("DO_VBODY", True))
+    # Bo qua mat qua nho: nguong khoang cach hai mat, tinh bang pixel tren frame
+    # da resize ve VIDEO_MAX_SIDE. 0 = giu tat ca.
+    #
+    # Day la van dieu chinh chinh khi bang phinh: mot canh dong nguoi co the cho
+    # ra vai chuc mat cao 10px moi frame, khong dung duoc vao viec gi ma chiem
+    # phan lon so dong.
+    video_min_face_px: int = field(
+        default_factory=lambda: _i("VIDEO_MIN_FACE_PX", 0))
+    # IoU toi thieu de coi hai bbox o hai frame lien tiep la cung mot nguoi.
+    video_track_iou: float = field(
+        default_factory=lambda: _f("VIDEO_TRACK_IOU", 0.30))
     # Gom frame thanh doan: cho phep mat hut trong bao lau ma van tinh la lien tuc
     video_gap_ms: int = field(default_factory=lambda: _i("VIDEO_GAP_MS", 800))
     clip_seconds: float = field(default_factory=lambda: _f("CLIP_SECONDS", 2.6))
@@ -131,12 +161,20 @@ class Settings:
             f"http {self.immich_url}" if self.immich_url else "chua cau hinh")
         vid = (f"{self.video_fps or 'moi'} frame/s, mat>={self.video_sim} cosine, "
                f"doan {self.clip_seconds}s" if self.do_video else "tat")
+        deep = ", ".join(x for x in (
+            "mat-la" if self.video_keep_unmatched else "",
+            "emb" if self.video_store_emb else "",
+            "lmk68" if self.video_lmk68 else "",
+            "body" if self.do_vbody else "",
+            f"min-mat={self.video_min_face_px}px" if self.video_min_face_px else "",
+        ) if x) or "toi thieu"
         return (f"pg      {self.pg_user}@{self.pg_host}:{self.pg_port}/{self.pg_db}"
                 f"  prefix={self.prefix}\n"
                 f"anh     {src}\n"
                 f"model   dir={self.model_dir} face={self.face_model} "
                 f"body={self.body_model}\n"
                 f"video   {vid}\n"
+                f"vdata   {deep}\n"
                 f"resource gpu={self.use_gpu} threads={self.onnx_threads} "
                 f"sleep={self.sleep_ms}ms batch={self.batch} limit={self.limit or '-'}")
 
