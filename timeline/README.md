@@ -199,12 +199,32 @@ appear in a dropdown in step 4, refreshed each time you open that step so
 dropping a file into the directory needs no browser reload. `GET /api/music`
 lists the same thing.
 
-**There is no upload, deliberately.** The name comes from the client and ends up
-on an ffmpeg command line, so every check lives in one place — `tl/music.py`
-rejects absolute paths, `..` segments, and anything that resolves outside the
-directory after symlinks — and nothing in the service can write into that
-directory. Adding a track means copying a file onto the host. That is one fewer
-write path in a service that ships with no authentication.
+You can also **upload from step 4**, which is simpler than reaching for ssh every
+time you want to try a track. That was deliberately absent at first, and adding it
+means the directory has to be mounted read-write, so the tradeoff is paid for in
+four places rather than waved away:
+
+| Guard | Why it is not optional |
+|---|---|
+| 30 MB per file, checked **while writing** | A `Content-Length` can be absent or wrong, so the header check alone decides nothing |
+| 500 MB for the whole directory | `MUSIC_DIR` usually shares a partition with the container runtime. Filling the disk does not fail the upload, it takes the node down |
+| `ffprobe` must find an audio stream | A `.mp3` can be anything. The only proof it is music is that a decoder can read it — and this catches corrupt files at upload rather than mid-render |
+| Written as `.part`, then renamed atomically | The UI re-reads the list, so a half-uploaded file must never appear as a selectable track |
+
+Names are sanitised down to the basename before anything else, so
+`a/../../b.mp3` becomes `b.mp3` rather than something creative. Uploads always
+land directly in `MUSIC_DIR`; subdirectories are still read if you copy them in
+by hand. An existing name is never overwritten silently — a second `01.mp3`
+becomes `01-2.mp3`, because a project pointing at the old track must not quietly
+change music.
+
+Reading, writing and deleting all go through the same `resolve()`, so there is no
+second code path with weaker checks. `tl/music.py` rejects absolute paths, `..`
+segments, and anything that resolves outside the directory after symlinks.
+
+**Set `API_TOKEN` if you enable uploads.** The upload and delete endpoints sit
+behind the same middleware as everything else, so a token protects them — but with
+no token, anything on your network can write files to the host.
 
 An unresolvable name is **dropped rather than raising**, because one bad name
 should not fail a whole render. Silent on the server would be silent for the

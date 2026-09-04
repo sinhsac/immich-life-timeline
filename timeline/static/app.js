@@ -11,7 +11,7 @@ const S = {
   person: null, projectId: null, filters: {}, defaults: null,
   result: null, renderId: null, poll: null, postures: [], orients: [],
   statusTimer: null, prevTimer: null, sbTimer: null, sb: null, out: null,
-  picked: new Map(), people: [], sug: [], view: 1, progress: null,
+  picked: new Map(), people: [], sug: [], view: 1, progress: null, music: null,
   // Each element is ONE PERSON: {name, ids:[cluster...]}. Empty = all the
   // currently selected clusters belong to the same person (the common case).
   subjects: [],
@@ -165,6 +165,8 @@ function showStats() {
     $(id).onchange = () => { syncMusic(); storyboardSoon(); };
   });
   $('r_xfade_auto').onchange = syncXfade;
+  $('musicUpload').onclick = uploadMusic;
+  $('r_musicFile').onchange = () => { $('musicUpState').textContent = ''; };
   // Every range mirrors itself into <output id="o_<name>">, and the three that
   // move the duration also queue a storyboard.
   const SB_RANGE = new Set(['r_beat_every', 'r_title_seconds', 'r_outro_s']);
@@ -1126,9 +1128,9 @@ function syncXfade() {
   $('xfWrap').classList.toggle('off', $('r_xfade_auto').checked);
 }
 
-// MUSIC_DIR is read-only by design, so the list is whatever is on disk. Reload
-// it on entering step 4 rather than only at startup: dropping a file into the
-// directory should not need a browser refresh.
+// Tracks live in MUSIC_DIR on the server. Reload the list on entering step 4
+// rather than only at startup, so a track uploaded from another tab or copied in
+// by hand shows up without a browser refresh.
 async function loadMusic() {
   let d = null;
   try {
@@ -1136,26 +1138,112 @@ async function loadMusic() {
   } catch (e) {
     d = null;
   }
+  showMusic(d);
+}
+
+// Shared by the initial load, the upload response and the delete response: all
+// three return the same shape, so the list is never rebuilt from a guess about
+// what changed.
+function showMusic(d) {
+  S.music = d;
   const sel = $('r_music');
   const keep = sel.value;
+  const list = (d && d.music) ? d.music : [];
   sel.innerHTML = '<option value="">None — silence between the clips</option>';
-  (d && d.music ? d.music : []).forEach((m) => {
+  list.forEach((m) => {
     const o = document.createElement('option');
     o.value = m.name;
     o.textContent = `${m.label} (${(m.size / 1048576).toFixed(1)} MB)`;
     sel.appendChild(o);
   });
-  if (keep) sel.value = keep;
-  const n = (d && d.music) ? d.music.length : 0;
+  // Keep the selection only if the track still exists — deleting the selected
+  // track has to clear it, otherwise the render silently comes out with no music.
+  if (keep && list.some((m) => m.name === keep)) sel.value = keep;
+
+  const u = (d && d.usage) || {};
+  const conf = !!(d && d.configured);
   $('musicNote').innerHTML = !d
     ? '<div class="warn">Could not read the track list.</div>'
-    : (!d.configured
-      ? '<div class="warn"><code>MUSIC_DIR</code> is not set, so there is no '
-        + 'music to choose from. Point it at a directory of tracks mounted '
-        + 'read-only and restart the service.</div>'
-      : (n ? '' : '<div class="warn"><code>MUSIC_DIR</code> is set but empty. '
-        + 'Copy a few tracks into it — no upload from here, on purpose.</div>'));
+    : (!conf
+      ? '<div class="warn"><code>MUSIC_DIR</code> is not set on the server, so '
+        + 'there is nothing to choose from and nothing can be uploaded.</div>'
+      : (list.length ? '' : '<p class="muted">No track yet. Upload one below, or '
+        + 'copy files into <code>MUSIC_DIR</code> on the server.</p>'));
+
+  $('r_musicFile').disabled = !conf;
+  $('musicUpload').disabled = !conf;
+  $('musicList').innerHTML = list.length
+    ? '<table><tr><th>Track</th><th>Size</th><th></th></tr>'
+      + list.map((m) => '<tr><td>' + esc(m.name) + '</td>'
+        + `<td>${(m.size / 1048576).toFixed(1)} MB</td>`
+        + `<td><button type="button" class="del" data-name="${esc(m.name)}">`
+        + 'delete</button></td></tr>').join('')
+      + '</table>'
+      + (u.used_mb != null
+        ? `<p class="muted">${u.used_mb} of ${u.total_mb} MB used · `
+          + `at most ${u.max_file_mb} MB per file · ${(u.exts || []).join(' ')}`
+          + '</p>' : '')
+    : '';
+  $('musicList').querySelectorAll('button.del').forEach((b) => {
+    b.onclick = () => deleteMusic(b.dataset.name);
+  });
   syncMusic();
+}
+
+// The track name goes into HTML here and onto an ffmpeg command line on the
+// server. The server sanitises its side; this escapes ours.
+function esc(v) {
+  return String(v).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c]);
+}
+
+async function uploadMusic() {
+  const f = $('r_musicFile').files[0];
+  if (!f) { toast('Pick an audio file first.', true); return; }
+  const fd = new FormData();
+  fd.append('file', f, f.name);
+  $('musicUpload').disabled = true;
+  $('musicUpState').textContent =
+    `uploading ${f.name} (${(f.size / 1048576).toFixed(1)} MB)…`;
+  try {
+    // No Content-Type header: the browser has to set the multipart boundary
+    // itself, and api() would otherwise force application/json and the server
+    // would fail to parse the body.
+    const h = TOKEN ? {Authorization: 'Bearer ' + TOKEN} : {};
+    const r = await fetch('/api/music', {method: 'POST', headers: h, body: fd});
+    if (!r.ok) {
+      let msg = r.statusText;
+      try { msg = (await r.json()).detail || msg; } catch (e) { /* no body */ }
+      throw new Error(msg);
+    }
+    const d = await r.json();
+    showMusic(d);
+    $('r_music').value = d.name;          // select what was just uploaded
+    $('r_musicFile').value = '';
+    $('musicUpState').textContent = '';
+    syncMusic();
+    storyboardSoon();
+    toast(`Uploaded ${d.name}`);
+  } catch (e) {
+    $('musicUpState').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    toast(e.message, true);
+  } finally {
+    $('musicUpload').disabled = false;
+  }
+}
+
+async function deleteMusic(name) {
+  if (!confirm(`Delete ${name}?`)) return;
+  try {
+    const d = await api('/music/' + name.split('/').map(encodeURIComponent)
+      .join('/'), {method: 'DELETE'});
+    showMusic(d);
+    storyboardSoon();
+    toast(`Deleted ${name}`);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function syncRenderMode() {

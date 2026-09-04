@@ -446,6 +446,12 @@
           <select id="r_music">
             <option value="">None — silence between the clips</option>
           </select></label>
+        <div class="upl">
+          <input type="file" id="r_musicFile" accept="audio/*">
+          <button id="musicUpload" type="button">Upload</button>
+        </div>
+        <div id="musicUpState" class="muted"></div>
+        <div id="musicList"></div>
         <p class="muted">Photos are silent, video clips are not. Two clips
           separated by four photos means five seconds of silence and then sound
           slamming back in. The audio lead and tail soften the two edges; they

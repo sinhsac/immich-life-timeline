@@ -411,6 +411,30 @@ details.sub[open]>summary{border-bottom:1px solid var(--line);
 details.sub label{margin:11px 0}
 details.sub p.muted{margin:5px 0 11px}
 
+/* ------------------------------------------------------- music upload --- */
+.upl{display:flex;gap:8px;align-items:center;margin:10px 0 4px;flex-wrap:wrap}
+.upl input[type=file]{flex:1;min-width:0;font-size:12px;color:var(--muted);
+  background:var(--sunken);border:1px solid var(--line-strong);
+  border-radius:6px;padding:6px 8px}
+.upl input[type=file]::file-selector-button{font:inherit;font-size:12px;
+  background:var(--panel);color:var(--fg-soft);border:1px solid var(--line-strong);
+  border-radius:5px;padding:4px 10px;margin-right:9px;cursor:pointer}
+.upl button{background:var(--acc);color:#fff;border:1px solid var(--acc);
+  border-radius:var(--r-sm);padding:7px 15px;cursor:pointer;font-weight:600;
+  font-size:13px}
+.upl button:hover:not(:disabled){background:#1a5fd0}
+.upl button:disabled,.upl input:disabled{opacity:.5;cursor:not-allowed}
+#musicUpState:empty{display:none}
+#musicUpState{margin:4px 0 8px}
+#musicList{margin:10px 0 6px}
+#musicList table{font-size:12px}
+#musicList td,#musicList th{padding:5px 9px}
+#musicList td:first-child{word-break:break-all;font-variant-numeric:normal}
+#musicList button.del{background:transparent;color:var(--bad);
+  border:1px solid var(--line-strong);border-radius:5px;padding:2px 9px;
+  cursor:pointer;font-size:11.5px;font-weight:550}
+#musicList button.del:hover{background:var(--bad-soft);border-color:#f3c4c1}
+
 /* ---------------------------------------------------------- result page */
 #outHead{margin-bottom:4px}
 #outHead h3{margin:0 0 3px;font-size:19px;font-weight:680;text-transform:none;

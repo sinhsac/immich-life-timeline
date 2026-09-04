@@ -15,7 +15,7 @@
 """
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -111,14 +111,76 @@ def defaults():
 
 @router.get("/music")
 def list_music():
-    """Cac ban nhac trong MUSIC_DIR. Rong nghia la chua cau hinh MUSIC_DIR.
+    """Cac ban nhac trong MUSIC_DIR. configured=false nghia la chua cau hinh.
 
     'name' la thu gui lai trong render options: {"music": "cham/piano-01.mp3"}.
     Chi tra ve duong dan TUONG DOI — duong dan tuyet doi tren server khong phai
     viec cua client, va nhan lai duong dan tuyet doi tu client la mot lo hong.
     """
     s = get()
-    return {"configured": bool(s.music_dir), "music": music.available(s)}
+    return {"configured": bool(s.music_dir), "music": music.available(s),
+            "usage": music.usage(s)}
+
+
+@router.post("/music")
+def upload_music(file: UploadFile = File(...)):
+    """Tai mot ban nhac len MUSIC_DIR.
+
+    Truoc day khong co endpoint nay va thu muc mount read-only. Doi lai la moi
+    lan them bai phai ssh vao may, nen no o day — nhung moi kiem tra van nam
+    trong tl/music.py, mot cho duy nhat, ke ca duong ghi.
+
+    Kich thuoc lay CHINH XAC tu than request da duoc starlette spool ra dia,
+    khong doan qua Content-Length: header do do ca phan boundary cua multipart
+    nen mot file dung bang tran se bi tu choi oan.
+    """
+    s = get()
+    if not s.music_dir:
+        raise HTTPException(409, "MUSIC_DIR is not configured on the server")
+
+    declared = 0
+    try:
+        file.file.seek(0, 2)
+        declared = file.file.tell()
+        file.file.seek(0)
+    except (OSError, AttributeError):
+        declared = 0
+
+    def chunks():
+        while True:
+            b = file.file.read(1 << 20)
+            if not b:
+                break
+            yield b
+
+    try:
+        name, n = music.save(s, file.filename, chunks(), declared)
+    except music.MusicError as e:
+        raise HTTPException(400, str(e)) from e
+    finally:
+        try:
+            file.file.close()
+        except OSError:
+            pass
+    return {"name": name, "size": n, "configured": True,
+            "music": music.available(s), "usage": music.usage(s)}
+
+
+@router.delete("/music/{name:path}")
+def delete_music(name: str):
+    """Xoa mot ban nhac. Di qua dung ham resolve() nhu luc doc, nen khong co
+    duong nao xoa duoc file ngoai MUSIC_DIR.
+
+    Co endpoint nay vi khong co no thi upload la mot chieu: them duoc ma khong bo
+    duoc, va lai phai ssh vao may — dung cai viec ma upload sinh ra de tranh.
+    """
+    s = get()
+    if not s.music_dir:
+        raise HTTPException(409, "MUSIC_DIR is not configured on the server")
+    if not music.delete(s, name):
+        raise HTTPException(404, "no such track")
+    return {"deleted": name, "configured": True,
+            "music": music.available(s), "usage": music.usage(s)}
 
 
 # ----------------------------------------------------------------- buoc 1
