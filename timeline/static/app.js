@@ -12,6 +12,7 @@ const S = {
   result: null, renderId: null, poll: null, postures: [], orients: [],
   statusTimer: null, prevTimer: null, sbTimer: null, sb: null, out: null,
   picked: new Map(), people: [], sug: [], view: 1, progress: null, music: null,
+  musicMeta: null,
   // Each element is ONE PERSON: {name, ids:[cluster...]}. Empty = all the
   // currently selected clusters belong to the same person (the common case).
   subjects: [],
@@ -161,12 +162,22 @@ function showStats() {
     'r_arc'].forEach((id) => {
     $(id).onchange = storyboardSoon;
   });
-  ['r_music', 'r_beat_sync'].forEach((id) => {
-    $(id).onchange = () => { syncMusic(); storyboardSoon(); };
-  });
+  // r_music is a hidden input set from JS, which fires no change event — its
+  // side effects live in pickMusic() instead.
+  $('r_beat_sync').onchange = () => {
+    syncMusic(); renderPick(); storyboardSoon();
+  };
   $('r_xfade_auto').onchange = syncXfade;
   $('musicUpload').onclick = uploadMusic;
   $('r_musicFile').onchange = () => { $('musicUpState').textContent = ''; };
+  $('musicRandom').onclick = randomMusic;
+  $('musicQ').oninput = () => { MQ.q = $('musicQ').value; loadMusicSoon(true); };
+  $('musicSort').onchange = () => {
+    MQ.sort = $('musicSort').value; loadMusicSoon(true);
+  };
+  $('musicFolder').onchange = () => {
+    MQ.folder = $('musicFolder').value; loadMusicSoon(true);
+  };
   // Every range mirrors itself into <output id="o_<name>">, and the three that
   // move the duration also queue a storyboard.
   const SB_RANGE = new Set(['r_beat_every', 'r_title_seconds', 'r_outro_s']);
@@ -1128,67 +1139,11 @@ function syncXfade() {
   $('xfWrap').classList.toggle('off', $('r_xfade_auto').checked);
 }
 
-// Tracks live in MUSIC_DIR on the server. Reload the list on entering step 4
-// rather than only at startup, so a track uploaded from another tab or copied in
-// by hand shows up without a browser refresh.
-async function loadMusic() {
-  let d = null;
-  try {
-    d = await api('/music');
-  } catch (e) {
-    d = null;
-  }
-  showMusic(d);
-}
-
-// Shared by the initial load, the upload response and the delete response: all
-// three return the same shape, so the list is never rebuilt from a guess about
-// what changed.
-function showMusic(d) {
-  S.music = d;
-  const sel = $('r_music');
-  const keep = sel.value;
-  const list = (d && d.music) ? d.music : [];
-  sel.innerHTML = '<option value="">None — silence between the clips</option>';
-  list.forEach((m) => {
-    const o = document.createElement('option');
-    o.value = m.name;
-    o.textContent = `${m.label} (${(m.size / 1048576).toFixed(1)} MB)`;
-    sel.appendChild(o);
-  });
-  // Keep the selection only if the track still exists — deleting the selected
-  // track has to clear it, otherwise the render silently comes out with no music.
-  if (keep && list.some((m) => m.name === keep)) sel.value = keep;
-
-  const u = (d && d.usage) || {};
-  const conf = !!(d && d.configured);
-  $('musicNote').innerHTML = !d
-    ? '<div class="warn">Could not read the track list.</div>'
-    : (!conf
-      ? '<div class="warn"><code>MUSIC_DIR</code> is not set on the server, so '
-        + 'there is nothing to choose from and nothing can be uploaded.</div>'
-      : (list.length ? '' : '<p class="muted">No track yet. Upload one below, or '
-        + 'copy files into <code>MUSIC_DIR</code> on the server.</p>'));
-
-  $('r_musicFile').disabled = !conf;
-  $('musicUpload').disabled = !conf;
-  $('musicList').innerHTML = list.length
-    ? '<table><tr><th>Track</th><th>Size</th><th></th></tr>'
-      + list.map((m) => '<tr><td>' + esc(m.name) + '</td>'
-        + `<td>${(m.size / 1048576).toFixed(1)} MB</td>`
-        + `<td><button type="button" class="del" data-name="${esc(m.name)}">`
-        + 'delete</button></td></tr>').join('')
-      + '</table>'
-      + (u.used_mb != null
-        ? `<p class="muted">${u.used_mb} of ${u.total_mb} MB used · `
-          + `at most ${u.max_file_mb} MB per file · ${(u.exts || []).join(' ')}`
-          + '</p>' : '')
-    : '';
-  $('musicList').querySelectorAll('button.del').forEach((b) => {
-    b.onclick = () => deleteMusic(b.dataset.name);
-  });
-  syncMusic();
-}
+// ---------------------------------------------------------------- music ---
+// Sized for a library, not a handful of files. The server pages and filters, so
+// the browser never holds the whole list: at a thousand tracks the question is
+// no longer "which of these" but "how do I narrow this down and hear it".
+const MQ = {q: '', offset: 0, limit: 30, sort: 'name', folder: ''};
 
 // The track name goes into HTML here and onto an ffmpeg command line on the
 // server. The server sanitises its side; this escapes ours.
@@ -1198,18 +1153,213 @@ function esc(v) {
   })[c]);
 }
 
+const mmss = (sec) => {
+  if (sec == null) return '';
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+const musicUrl = (name) => '/api/music/file/'
+  + name.split('/').map(encodeURIComponent).join('/')
+  + (TOKEN ? `?token=${TOKEN}` : '');
+
+async function loadMusic() {
+  const p = new URLSearchParams({
+    q: MQ.q, offset: MQ.offset, limit: MQ.limit, sort: MQ.sort,
+  });
+  if (MQ.folder) p.set('folder', MQ.folder);
+  let d = null;
+  try {
+    d = await api('/music?' + p.toString());
+  } catch (e) {
+    d = null;
+  }
+  showMusic(d);
+}
+
+let musicTimer = null;
+function loadMusicSoon(resetOffset) {
+  if (resetOffset) MQ.offset = 0;
+  clearTimeout(musicTimer);
+  musicTimer = setTimeout(loadMusic, 250);
+}
+
+// Shared by the page load, the upload response and the delete response: all
+// three return the same shape, so the view is never rebuilt from a guess about
+// what changed.
+function showMusic(d) {
+  S.music = d;
+  const conf = !!(d && d.configured);
+  const list = (d && d.music) ? d.music : [];
+  const u = (d && d.usage) || {};
+  const total = (d && d.total) || 0;
+
+  $('musicNote').innerHTML = !d
+    ? '<div class="warn">Could not read the track list.</div>'
+    : (!conf
+      ? '<div class="warn"><code>MUSIC_DIR</code> is not set on the server, so '
+        + 'there is nothing to choose from and nothing can be uploaded.</div>'
+      : (u.n ? '' : '<p class="muted">No track yet. Upload one below, or copy '
+        + 'files into <code>MUSIC_DIR</code> on the server — for a whole '
+        + 'library, mounting it read-only beats uploading it.</p>'));
+
+  ['r_musicFile', 'musicUpload', 'musicQ', 'musicRandom', 'musicSort',
+    'musicFolder'].forEach((id) => { $(id).disabled = !conf; });
+
+  // Folder list only changes when files change, so rebuild it from the response
+  // rather than keeping a second source of truth.
+  const folders = (d && d.folders) || [];
+  const fsel = $('musicFolder');
+  if (fsel.dataset.sig !== folders.join('|')) {
+    fsel.dataset.sig = folders.join('|');
+    fsel.innerHTML = '<option value="">All folders</option>'
+      + folders.map((f) => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
+    fsel.value = MQ.folder;
+  }
+
+  $('musicResults').innerHTML = list.length
+    ? list.map((m) => {
+      const sel = m.name === $('r_music').value;
+      const bits = [mmss(m.duration), m.bpm ? `${m.bpm} BPM` : '',
+        `${(m.size / 1048576).toFixed(1)} MB`].filter(Boolean).join(' · ');
+      return `<div class="mitem${sel ? ' on' : ''}" data-name="${esc(m.name)}">`
+        + `<button type="button" class="play" data-name="${esc(m.name)}"`
+        + ' title="Listen">▶</button>'
+        + `<span class="mn">${esc(m.name)}</span>`
+        + `<span class="mm">${bits}</span>`
+        + `<button type="button" class="del" data-name="${esc(m.name)}"`
+        + ' title="Delete">×</button></div>';
+    }).join('')
+    : (conf && u.n ? '<p class="muted">Nothing matches that search.</p>' : '');
+
+  $('musicResults').querySelectorAll('.mitem').forEach((n) => {
+    n.onclick = (ev) => {
+      if (ev.target.closest('button')) return;   // ▶ and × handle themselves
+      pickMusic(n.dataset.name);
+    };
+  });
+  $('musicResults').querySelectorAll('button.play').forEach((b) => {
+    b.onclick = () => playMusic(b.dataset.name);
+  });
+  $('musicResults').querySelectorAll('button.del').forEach((b) => {
+    b.onclick = () => deleteMusic(b.dataset.name);
+  });
+
+  // Pager: only rendered when it is needed, so a small library shows no clutter.
+  const from = total ? MQ.offset + 1 : 0;
+  const to = Math.min(MQ.offset + MQ.limit, total);
+  $('musicPager').innerHTML = total > MQ.limit
+    ? `<button type="button" id="mPrev"${MQ.offset ? '' : ' disabled'}>←</button>`
+      + `<span class="muted">${from}–${to} of ${num(total)}</span>`
+      + `<button type="button" id="mNext"${to >= total ? ' disabled' : ''}>→</button>`
+    : (total ? `<span class="muted">${num(total)} of ${num(u.n || 0)} tracks`
+      + '</span>' : '');
+  if ($('mPrev')) {
+    $('mPrev').onclick = () => {
+      MQ.offset = Math.max(0, MQ.offset - MQ.limit); loadMusic();
+    };
+    $('mNext').onclick = () => { MQ.offset += MQ.limit; loadMusic(); };
+  }
+
+  if (u.used_mb != null) {
+    $('musicUpState').dataset.usage =
+      `${u.used_mb} MB used · ${u.free_mb} MB free on disk`;
+  }
+  renderPick();
+  syncMusic();
+}
+
+// The chosen track shown on its own line: with a search list you scroll away
+// from your choice, so it has to be visible without hunting for the highlight.
+function renderPick() {
+  const name = $('r_music').value;
+  const box = $('musicPick');
+  if (!name) {
+    box.innerHTML = '<span class="muted">No track — the video will be silent '
+      + 'apart from any clip audio.</span>';
+    return;
+  }
+  const m = S.musicMeta || {};
+  const bits = [mmss(m.duration), m.bpm ? `${m.bpm} BPM` : ''].filter(Boolean);
+  box.innerHTML = `<b>${esc(name)}</b>`
+    + (bits.length ? ` <span class="muted">${bits.join(' · ')}</span>` : '')
+    + ' <button type="button" id="mPlaySel" title="Listen">▶</button>'
+    + ' <button type="button" id="mClear">clear</button>'
+    + hintFor(m);
+  $('mPlaySel').onclick = () => playMusic(name);
+  $('mClear').onclick = () => pickMusic('');
+}
+
+// Whether the tempo suits the pacing is the one thing that actually matters for
+// beat sync, and it is not obvious from a BPM number alone.
+function hintFor(m) {
+  if (!m || !m.bpm || !$('r_beat_sync').checked) return '';
+  const every = Number($('r_beat_every').value) || 1;
+  const unit = every * 60 / m.bpm;
+  const beat = (S.result && S.result.story && S.result.story.hold_beat) || 1.0;
+  const off = Math.abs(unit - beat) / beat;
+  const txt = `<p class="muted">Cut unit ${unit.toFixed(2)}s against a `
+    + `${beat}s supporting shot`;
+  if (off <= 0.3) return txt + ' — a good match.</p>';
+  return txt + `. Try <b>beat every ${unit > beat ? Math.max(1, every - 1)
+    : every + 1}</b> to get closer.</p>`;
+}
+
+async function pickMusic(name) {
+  $('r_music').value = name || '';
+  S.musicMeta = null;
+  renderPick();
+  syncMusic();
+  storyboardSoon();
+  if (!name) { showMusic(S.music); return; }
+  // Highlight moves immediately; the metadata request is what takes time.
+  $('musicResults').querySelectorAll('.mitem').forEach((n) => {
+    n.classList.toggle('on', n.dataset.name === name);
+  });
+  try {
+    // bpm=1 only here: beat detection decodes two minutes and runs an FFT, so it
+    // runs for the track you actually chose, never for a page of 30.
+    S.musicMeta = await api('/music/meta/'
+      + name.split('/').map(encodeURIComponent).join('/') + '?bpm=1');
+    renderPick();
+    storyboardSoon();
+  } catch (e) { /* metadata is a nicety, not worth a toast */ }
+}
+
+function playMusic(name) {
+  const a = $('musicAudio');
+  const url = musicUrl(name);
+  if (a.dataset.name === name && !a.paused) { a.pause(); return; }
+  a.dataset.name = name;
+  a.src = url;
+  a.play().catch(() => toast('Could not play that file.', true));
+}
+
+async function randomMusic() {
+  const p = new URLSearchParams({q: MQ.q});
+  if (MQ.folder) p.set('folder', MQ.folder);
+  try {
+    const d = await api('/music/random?' + p.toString());
+    await pickMusic(d.pick.name);
+    toast(`Picked ${d.pick.name} out of ${d.of}`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 async function uploadMusic() {
-  const f = $('r_musicFile').files[0];
-  if (!f) { toast('Pick an audio file first.', true); return; }
+  const files = [...$('r_musicFile').files];
+  if (!files.length) { toast('Pick one or more audio files first.', true); return; }
   const fd = new FormData();
-  fd.append('file', f, f.name);
+  files.forEach((f) => fd.append('files', f, f.name));
+  const mb = files.reduce((a, f) => a + f.size, 0) / 1048576;
   $('musicUpload').disabled = true;
   $('musicUpState').textContent =
-    `uploading ${f.name} (${(f.size / 1048576).toFixed(1)} MB)…`;
+    `uploading ${files.length} file(s), ${mb.toFixed(1)} MB…`;
   try {
     // No Content-Type header: the browser has to set the multipart boundary
-    // itself, and api() would otherwise force application/json and the server
-    // would fail to parse the body.
+    // itself, and api() would force application/json, which the server cannot
+    // parse as a body.
     const h = TOKEN ? {Authorization: 'Bearer ' + TOKEN} : {};
     const r = await fetch('/api/music', {method: 'POST', headers: h, body: fd});
     if (!r.ok) {
@@ -1218,13 +1368,19 @@ async function uploadMusic() {
       throw new Error(msg);
     }
     const d = await r.json();
+    MQ.q = ''; MQ.offset = 0; MQ.sort = 'newest';
+    $('musicQ').value = ''; $('musicSort').value = 'newest';
     showMusic(d);
-    $('r_music').value = d.name;          // select what was just uploaded
     $('r_musicFile').value = '';
-    $('musicUpState').textContent = '';
-    syncMusic();
-    storyboardSoon();
-    toast(`Uploaded ${d.name}`);
+    // Per-file results: one bad file must not hide the ones that went in.
+    $('musicUpState').innerHTML = (d.failed || []).length
+      ? `<span class="err">${d.failed.length} rejected: `
+        + d.failed.map((f) => `${esc(f.filename)} — ${esc(f.error)}`).join('; ')
+        + '</span>'
+      : '';
+    if ((d.uploaded || []).length === 1) await pickMusic(d.uploaded[0].name);
+    toast(`Uploaded ${(d.uploaded || []).length} file(s)`
+      + ((d.failed || []).length ? `, ${d.failed.length} rejected` : ''));
   } catch (e) {
     $('musicUpState').innerHTML = `<span class="err">${esc(e.message)}</span>`;
     toast(e.message, true);
@@ -1238,8 +1394,14 @@ async function deleteMusic(name) {
   try {
     const d = await api('/music/' + name.split('/').map(encodeURIComponent)
       .join('/'), {method: 'DELETE'});
+    // Deleting the selected track has to clear the selection, or the render
+    // quietly comes out with no music and nothing says why.
+    if ($('r_music').value === name) {
+      $('r_music').value = '';
+      S.musicMeta = null;
+      storyboardSoon();
+    }
     showMusic(d);
-    storyboardSoon();
     toast(`Deleted ${name}`);
   } catch (e) {
     toast(e.message, true);

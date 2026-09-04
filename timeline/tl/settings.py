@@ -20,6 +20,13 @@ def _i(k, d):
         return d
 
 
+def _f(k, d):
+    try:
+        return float(_s(k, str(d)))
+    except ValueError:
+        return d
+
+
 def _b(k, d=False):
     return _s(k, "1" if d else "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -48,14 +55,26 @@ class Settings:
     work_dir: str = field(default_factory=lambda: _s("WORK_DIR", "/work"))
 
     # ---- Nhac nen ----
-    # Mot thu muc chua san vai ban nhac, mount read-only. De trong = tat han
-    # tinh nang nhac nen.
+    # Mot thu muc chua nhac. De trong = tat han tinh nang nhac nen.
     #
     # Vi sao can nhac: anh tinh khong co tieng, doan video thi co. Hai doan video
     # cach nhau boi bon buc anh la nam giay im lang roi tieng ap vao — J-cut/L-cut
     # chi lam mem hai mep, khong lap duoc khoang trong. Nhac la thu giu mach am
     # lien tuc; beat-sync chi la phan them tren do.
     music_dir: str = field(default_factory=lambda: _s("MUSIC_DIR", ""))
+
+    # Tran cho upload. Mot bai 30MB la mp3 320kbps dai 12 phut, du cho moi nhu cau
+    # nhac nen; cao hon gan nhu chac chan la nguoi ta up nham file khac.
+    music_max_mb: float = field(default_factory=lambda: _f("MUSIC_MAX_MB", 30))
+    # Tran ca thu muc. Khong phai con so tuy y: nham vao ~1000 bai mp3 co dien.
+    music_max_total_mb: float = field(
+        default_factory=lambda: _f("MUSIC_MAX_TOTAL_MB", 6000))
+    # Va day la trần THAT SU quan trong: tu choi ghi khi dung luong trong cua
+    # filesystem se tut duoi muc nay. Tran co dinh o tren khong biet gi ve viec
+    # dia con bao nhieu — 6GB nhac la vo hai khi con 200GB va la tai hoa khi con
+    # 19GB tren cung phan vung voi container runtime.
+    music_min_free_mb: float = field(
+        default_factory=lambda: _f("MUSIC_MIN_FREE_MB", 3000))
 
     # ---- ffmpeg ----
     ffmpeg: str = field(default_factory=lambda: _s("FFMPEG", "ffmpeg"))

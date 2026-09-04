@@ -199,17 +199,54 @@ appear in a dropdown in step 4, refreshed each time you open that step so
 dropping a file into the directory needs no browser reload. `GET /api/music`
 lists the same thing.
 
-You can also **upload from step 4**, which is simpler than reaching for ssh every
-time you want to try a track. That was deliberately absent at first, and adding it
-means the directory has to be mounted read-write, so the tradeoff is paid for in
-four places rather than waved away:
+### Choosing a track out of a thousand
+
+The picker is built for a library rather than a handful of files, because at any
+real size the question stops being *"which of these"* and becomes *"how do I
+narrow this down, and how do I hear it"*. A `<select>` with a thousand options is
+not a way to choose music.
+
+So: the server pages and filters, and the browser never holds the whole list.
+
+| | |
+|---|---|
+| **Search** | Accent-insensitive on both sides, so `nhac cham` finds `Nhạc Chậm`. Multiple words must all appear but need not be adjacent, so `piano cham` finds `cham/piano-02.mp3` |
+| **Folders** | Subdirectories become a filter. Copy in `slow/`, `upbeat/` and you have categories for free |
+| **Sort** | name · newest · longest · shortest · largest |
+| **Audition** | ▶ on any row, served with HTTP `Range` so the scrub bar works. Choosing music you cannot hear is choosing blind, and without `Range` you would have to listen from the start to judge a track |
+| **Random** | Picks from the *current filter*, server-side. With a thousand tracks and one memory video, "choose one for me" is usually better than weighing a thousand options |
+
+**Duration is measured for the page you are looking at; BPM only for the track you
+select.** That split is not fussiness. Duration is an `ffprobe` header read at
+20–50 ms, so thirty of them is fine. Beat detection decodes two minutes and runs
+an FFT at 1–3 s per track — doing that for a listing would hang the request, and
+for a thousand tracks it is 20–50 minutes of CPU competing with Immich. Once
+measured, a BPM is cached and shown in the list.
+
+With `beat_sync` on, the selected track also gets a plain-language verdict: the
+cut unit it implies against your pacing, and which way to move `beat_every` if it
+is off.
+
+### Uploading
+
+**Upload is for "I found one track, let me try it". It is the wrong tool for a
+library** — pushing gigabytes through a single-worker service, one file at a time,
+through a browser. For a whole collection, mount it read-only or `rsync` once.
+Both mechanisms exist because they answer different needs.
+
+Uploading means the directory has to be mounted read-write, so the tradeoff is
+paid for rather than waved away:
 
 | Guard | Why it is not optional |
 |---|---|
-| 30 MB per file, checked **while writing** | A `Content-Length` can be absent or wrong, so the header check alone decides nothing |
-| 500 MB for the whole directory | `MUSIC_DIR` usually shares a partition with the container runtime. Filling the disk does not fail the upload, it takes the node down |
+| `MUSIC_MAX_MB` per file (30), checked **while writing** | A `Content-Length` can be absent or wrong, so the header check alone decides nothing |
+| `MUSIC_MAX_TOTAL_MB` for the directory (6000) | A ceiling you can reason about |
+| `MUSIC_MIN_FREE_MB` free space (3000) | **The one that matters.** The two fixed ceilings know nothing about how much disk is left, and `MUSIC_DIR` usually shares a partition with the container runtime — 6 GB of music is harmless with 200 GB free and a disaster with 19 GB. Filling the disk does not fail the upload, it takes the node down |
 | `ffprobe` must find an audio stream | A `.mp3` can be anything. The only proof it is music is that a decoder can read it — and this catches corrupt files at upload rather than mid-render |
 | Written as `.part`, then renamed atomically | The UI re-reads the list, so a half-uploaded file must never appear as a selectable track |
+
+Several files at once, with **per-file results**: one rejected file must not hide
+the ones that went in.
 
 Names are sanitised down to the basename before anything else, so
 `a/../../b.mp3` becomes `b.mp3` rather than something creative. Uploads always

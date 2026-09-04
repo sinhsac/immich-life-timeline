@@ -13,10 +13,13 @@
 
   GET    /api/progress                   tien do job indexer (ngoai 4 buoc)
 """
+import random
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import (APIRouter, File, HTTPException, Query, Request,
+                     UploadFile)
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import (db, music, people, projects, render, select, story, textdraw,
@@ -102,68 +105,209 @@ def progress():
 
 @router.get("/defaults")
 def defaults():
+    """Mac dinh cho UI. KHONG kem danh sach nhac.
+
+    Truoc day tra ve ca music.available(): voi mot nghin bai la ~100KB nhoi vao
+    moi lan tai trang, cho mot man hinh (buoc 4) ma co the nguoi dung khong mo.
+    Danh sach gio lay rieng qua /api/music, co phan trang.
+    """
+    s = get()
     return {"filters": select.DEFAULTS, "render": render.DEFAULT_OPTIONS,
-            "max_frames": get().max_frames,
-            "music": music.available(get()),
+            "max_frames": s.max_frames,
+            "music": {"configured": bool(s.music_dir),
+                      "usage": music.usage(s), "sorts": list(music.SORTS)},
             "story": {**story.describe(), "text_backend": textdraw.backend(),
                       "unicode_text": textdraw.unicode_ok()}}
 
 
+def _ranged(path: Path, media_type: str, rng: str | None):
+    """Tra file kem ho tro HTTP Range, de <audio> keo thanh tua duoc.
+
+    Viet tay chu khong dua vao FileResponse: ho tro Range cua starlette thay doi
+    giua cac phien ban, va mot thanh tua khong keo duoc thi khong ai phat hien ra
+    ngay — no chi lang le lam viec chon nhac tro thanh 'nghe het ca bai moi biet'.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        raise HTTPException(404, "no such track") from None
+    start, end, status = 0, size - 1, 200
+    headers = {"Accept-Ranges": "bytes",
+               "Cache-Control": "private, max-age=3600"}
+    if rng and rng.strip().startswith("bytes="):
+        spec = rng.split("=", 1)[1].split(",")[0].strip()
+        a, _, b = spec.partition("-")
+        try:
+            if a:
+                start = int(a)
+                if b:
+                    end = min(int(b), size - 1)
+            elif b:
+                start = max(0, size - int(b))    # 'bytes=-N' = N byte cuoi
+        except ValueError:
+            start, end = 0, size - 1
+        if start > end or start >= size:
+            # 416 phai kem Content-Range de client biet do dai thuc.
+            return Response(status_code=416,
+                            headers={"Content-Range": f"bytes */{size}"})
+        status = 206
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    length = end - start + 1
+    headers["Content-Length"] = str(length)
+
+    def body():
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            left = length
+            while left > 0:
+                chunk = fh.read(min(1 << 16, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(body(), status_code=status, headers=headers,
+                             media_type=media_type)
+
+
+def _music_page(s, q="", offset=0, limit=30, sort="name", folder=None):
+    """Vo boc dung chung cho moi endpoint tra ve danh sach nhac.
+
+    Luon tra ve DUNG MOT trang, khong bao gio ca thu vien: o muc mot nghin bai
+    thi tra het la ~100KB JSON moi lan mo man hinh, va phia UI khong the dung
+    mot <select> mot nghin dong.
+    """
+    total, items, folders = music.find(s, q, offset, limit, sort, folder)
+    return {"configured": bool(s.music_dir), "total": total, "music": items,
+            "folders": folders, "offset": offset, "limit": limit,
+            "q": q, "sort": sort, "folder": folder, "usage": music.usage(s)}
+
+
 @router.get("/music")
-def list_music():
-    """Cac ban nhac trong MUSIC_DIR. configured=false nghia la chua cau hinh.
+def list_music(q: str = Query("", max_length=120),
+               offset: int = Query(0, ge=0),
+               limit: int = Query(30, ge=1, le=200),
+               sort: str = Query("name"),
+               folder: str | None = Query(None)):
+    """Mot trang danh sach nhac. configured=false nghia la chua cau hinh MUSIC_DIR.
 
     'name' la thu gui lai trong render options: {"music": "cham/piano-01.mp3"}.
     Chi tra ve duong dan TUONG DOI — duong dan tuyet doi tren server khong phai
     viec cua client, va nhan lai duong dan tuyet doi tu client la mot lo hong.
+
+    Tim kiem BO DAU o ca hai phia, vi ten file o day la tieng Viet co dau ma go
+    co dau vao o tim kiem thi bat tien den muc o do thanh vo dung.
     """
     s = get()
-    return {"configured": bool(s.music_dir), "music": music.available(s),
-            "usage": music.usage(s)}
+    if sort not in music.SORTS:
+        sort = "name"
+    return _music_page(s, q, offset, limit, sort, folder or None)
+
+
+@router.get("/music/random")
+def random_music(q: str = Query("", max_length=120),
+                 folder: str | None = Query(None)):
+    """Chon ngau nhien mot bai TRONG TAP DA LOC.
+
+    Chon o phia server chu khong phia client, de khong phai tai ca nghin dong ve
+    chi de bo di tat ca tru mot. Voi mot nghin bai va mot video ky niem thi
+    'chon ho toi mot bai' thuong la thu dung hon la ngoi can mot nghin lua chon.
+    """
+    s = get()
+    total, _items, _f = music.find(s, q, 0, 1, "name", folder or None)
+    if not total:
+        raise HTTPException(404, "no track matches")
+    _t, page, _f2 = music.find(s, q, random.randrange(total), 1, "name",
+                               folder or None)
+    if not page:
+        raise HTTPException(404, "no track matches")
+    return {"pick": page[0], "of": total}
+
+
+@router.get("/music/meta/{name:path}")
+def music_meta(name: str, bpm: bool = Query(False)):
+    """Do dai, va BPM khi bpm=1.
+
+    BPM tach ra sau mot co rieng vi no DAT: giai ma 120 giay + FFT, khoang 1-3
+    giay moi bai. Lam viec do cho ca mot trang danh sach la treo request; cho ca
+    nghin bai la 20-50 phut CPU tranh voi Immich. Nen chi do khi nguoi dung thuc
+    su chon mot bai.
+    """
+    s = get()
+    m = music.meta(s, name, want_bpm=bool(bpm))
+    if m is None:
+        raise HTTPException(404, "no such track")
+    return m
+
+
+@router.get("/music/file/{name:path}")
+def play_music(name: str, request: Request):
+    """Phat thu mot bai trong trinh duyet, co ho tro Range.
+
+    Range khong phai tuy chon: khong co no thi thanh tua cua <audio> khong keo
+    duoc, va chon nhac ma khong nhay den doan giua bai thi phai nghe het ca bai
+    moi biet no the nao.
+    """
+    s = get()
+    p = music.resolve(s, name)
+    if p is None:
+        raise HTTPException(404, "no such track")
+    return _ranged(p, music.mime(p), request.headers.get("range"))
 
 
 @router.post("/music")
-def upload_music(file: UploadFile = File(...)):
-    """Tai mot ban nhac len MUSIC_DIR.
+def upload_music(files: list[UploadFile] = File(...)):
+    """Tai mot hoac NHIEU ban nhac len MUSIC_DIR.
 
-    Truoc day khong co endpoint nay va thu muc mount read-only. Doi lai la moi
-    lan them bai phai ssh vao may, nen no o day — nhung moi kiem tra van nam
-    trong tl/music.py, mot cho duy nhat, ke ca duong ghi.
+    Nhieu file mot lan vi mot file mot lan la khong dung duoc khi ban co ca mot
+    thu muc nhac. Tra ve ket qua TUNG FILE: mot file loi khong duoc phep lam mat
+    nhung file da vao duoc.
 
     Kich thuoc lay CHINH XAC tu than request da duoc starlette spool ra dia,
     khong doan qua Content-Length: header do do ca phan boundary cua multipart
     nen mot file dung bang tran se bi tu choi oan.
+
+    Voi ca mot kho nhac thi upload qua trinh duyet VAN la sai cong cu — mount
+    read-only thu muc co san, hoac rsync mot lan, la dung hon. Cho nay danh cho
+    'toi tim duoc mot bai, thu xem the nao'.
     """
     s = get()
     if not s.music_dir:
         raise HTTPException(409, "MUSIC_DIR is not configured on the server")
 
-    declared = 0
-    try:
-        file.file.seek(0, 2)
-        declared = file.file.tell()
-        file.file.seek(0)
-    except (OSError, AttributeError):
+    done, failed = [], []
+    for f in files:
         declared = 0
-
-    def chunks():
-        while True:
-            b = file.file.read(1 << 20)
-            if not b:
-                break
-            yield b
-
-    try:
-        name, n = music.save(s, file.filename, chunks(), declared)
-    except music.MusicError as e:
-        raise HTTPException(400, str(e)) from e
-    finally:
         try:
-            file.file.close()
-        except OSError:
-            pass
-    return {"name": name, "size": n, "configured": True,
-            "music": music.available(s), "usage": music.usage(s)}
+            f.file.seek(0, 2)
+            declared = f.file.tell()
+            f.file.seek(0)
+        except (OSError, AttributeError):
+            declared = 0
+
+        def chunks(fh=f.file):
+            while True:
+                b = fh.read(1 << 20)
+                if not b:
+                    break
+                yield b
+
+        try:
+            name, n = music.save(s, f.filename, chunks(), declared)
+            done.append({"name": name, "size": n})
+        except music.MusicError as e:
+            failed.append({"filename": f.filename, "error": str(e)})
+        finally:
+            try:
+                f.file.close()
+            except OSError:
+                pass
+
+    if not done and failed:
+        raise HTTPException(400, "; ".join(x["error"] for x in failed))
+    out = _music_page(s, "", 0, 30, "newest", None)
+    out.update(uploaded=done, failed=failed)
+    return out
 
 
 @router.delete("/music/{name:path}")
@@ -179,8 +323,9 @@ def delete_music(name: str):
         raise HTTPException(409, "MUSIC_DIR is not configured on the server")
     if not music.delete(s, name):
         raise HTTPException(404, "no such track")
-    return {"deleted": name, "configured": True,
-            "music": music.available(s), "usage": music.usage(s)}
+    out = _music_page(s, "", 0, 30, "name", None)
+    out["deleted"] = name
+    return out
 
 
 # ----------------------------------------------------------------- buoc 1

@@ -411,6 +411,54 @@ details.sub[open]>summary{border-bottom:1px solid var(--line);
 details.sub label{margin:11px 0}
 details.sub p.muted{margin:5px 0 11px}
 
+/* ------------------------------------------------------- music picker ---
+   Built for a library rather than a handful of files: search, page, audition.
+   A <select> with a thousand options is not a way to choose music. */
+.mpick{background:var(--sunken);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:9px 11px;margin:8px 0;font-size:12.5px;
+  line-height:1.6;word-break:break-all}
+.mpick b{font-weight:650}
+.mpick button{background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:5px;padding:1px 8px;
+  cursor:pointer;font-size:11.5px;margin-left:3px}
+.mpick button:hover{background:var(--acc-soft);border-color:var(--acc-line)}
+.mpick p.muted{margin:6px 0 0}
+
+.mrow{display:flex;gap:7px;align-items:center;margin:7px 0}
+.mrow input[type=search]{flex:1;min-width:0;background:var(--panel);
+  color:var(--fg);border:1px solid var(--line-strong);border-radius:6px;
+  padding:6px 9px;font:inherit;font-size:13px}
+.mrow select{flex:1;min-width:0}
+.mrow button{background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:6px 12px;
+  cursor:pointer;font-weight:550;font-size:12.5px;white-space:nowrap}
+.mrow button:hover:not(:disabled){background:var(--sunken)}
+.mrow button:disabled{opacity:.5;cursor:not-allowed}
+#musicPager{justify-content:center;gap:10px}
+
+#musicResults{max-height:270px;overflow:auto;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--panel)}
+#musicResults:empty{display:none}
+#musicResults p.muted{margin:10px 12px}
+.mitem{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;
+  align-items:center;padding:5px 8px;border-bottom:1px solid var(--line);
+  cursor:pointer}
+.mitem:last-child{border-bottom:0}
+.mitem:hover{background:var(--sunken)}
+.mitem.on{background:var(--acc-soft)}
+.mitem .mn{font-size:12px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.mitem.on .mn{font-weight:650;color:var(--acc)}
+.mitem .mm{font-size:11px;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.mitem button{border:1px solid var(--line-strong);background:var(--panel);
+  border-radius:5px;cursor:pointer;padding:1px 7px;font-size:11px;
+  color:var(--fg-soft);line-height:1.5}
+.mitem button.play:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mitem button.del{color:var(--bad)}
+.mitem button.del:hover{background:var(--bad-soft);border-color:#f3c4c1}
+#musicAudio{display:none}
+
 /* ------------------------------------------------------- music upload --- */
 .upl{display:flex;gap:8px;align-items:center;margin:10px 0 4px;flex-wrap:wrap}
 .upl input[type=file]{flex:1;min-width:0;font-size:12px;color:var(--muted);
@@ -426,14 +474,6 @@ details.sub p.muted{margin:5px 0 11px}
 .upl button:disabled,.upl input:disabled{opacity:.5;cursor:not-allowed}
 #musicUpState:empty{display:none}
 #musicUpState{margin:4px 0 8px}
-#musicList{margin:10px 0 6px}
-#musicList table{font-size:12px}
-#musicList td,#musicList th{padding:5px 9px}
-#musicList td:first-child{word-break:break-all;font-variant-numeric:normal}
-#musicList button.del{background:transparent;color:var(--bad);
-  border:1px solid var(--line-strong);border-radius:5px;padding:2px 9px;
-  cursor:pointer;font-size:11.5px;font-weight:550}
-#musicList button.del:hover{background:var(--bad-soft);border-color:#f3c4c1}
 
 /* ---------------------------------------------------------- result page */
 #outHead{margin-bottom:4px}

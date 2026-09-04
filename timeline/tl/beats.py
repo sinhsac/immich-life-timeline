@@ -16,6 +16,7 @@ numpy du dung cho nhac nen deu nhip, va ai muon tot hon thi
 Module chi doc file nhac. Khong cham db, khong biet gi ve shot hay video.
 """
 import subprocess
+from pathlib import Path
 
 import numpy as np
 
@@ -163,6 +164,50 @@ def detect(path, s):
     if beats:
         return beats, bpm
     return _numpy_beats(path, s)
+
+
+# Ket qua do nhip nho lai theo (duong dan, lan sua doi): mot ban nhac cho ra cung
+# mot luoi phach mai mai, ma do nhip la giai ma ca bai + FFT — khoang 1-3 giay moi
+# bai tren may nay. Khong co ly gi lam lai moi lan nguoi dung keo mot thanh truot.
+#
+# Cache dat o DAY chu khong o render.py vi gio co hai phia can no: buoc render, va
+# trinh chon nhac (muon hien BPM de loc bai khop nhip ke). Hai ban sao cua cung
+# mot cache se lech nhau va lam viec dat nay chay hai lan.
+_cache = {}
+
+
+def _key(path):
+    try:
+        return (str(path), path.stat().st_mtime_ns)
+    except OSError:
+        return None
+
+
+def cached_detect(path, s):
+    """detect() co nho ket qua. Tra ve (moc phach, bpm)."""
+    k = _key(path)
+    if k is None:
+        return None, None
+    hit = _cache.get(k)
+    if hit is None:
+        hit = detect(path, s)
+        _cache[k] = hit
+        if hit[0]:
+            print(f"[beats] {Path(path).name}: {len(hit[0])} phach, "
+                  f"{hit[1]:.0f} BPM")
+        else:
+            print(f"[beats] khong tim ra nhip ro trong {Path(path).name}")
+    return hit
+
+
+def peek(path):
+    """Ket qua da do TRUOC DAY, hoac None neu chua do. Khong bao gio tu do.
+
+    Trinh chon nhac dung ham nay de hien BPM cho nhung bai da biet ma khong lam
+    mot lan mo danh sach thanh 30 lan giai ma.
+    """
+    k = _key(path)
+    return _cache.get(k) if k else None
 
 
 def grid(beats, total, every=1):

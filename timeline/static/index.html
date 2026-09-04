@@ -442,16 +442,37 @@
 
         <h3>Background music</h3>
         <div id="musicNote"></div>
-        <label>Track
-          <select id="r_music">
-            <option value="">None — silence between the clips</option>
-          </select></label>
+        <!-- The chosen track lives in a hidden input rather than a <select>: a
+             thousand <option> rows is not a way to choose music, and everything
+             downstream (renderOpts, beat sync gating) already reads .value. -->
+        <input type="hidden" id="r_music" value="">
+        <div id="musicPick" class="mpick"></div>
+        <div class="mrow">
+          <input type="search" id="musicQ" placeholder="Search tracks…"
+                 autocomplete="off">
+          <button id="musicRandom" type="button" title="Pick one at random from
+            the current filter">Random</button>
+        </div>
+        <div class="mrow">
+          <select id="musicFolder"><option value="">All folders</option></select>
+          <select id="musicSort">
+            <option value="name" selected>By name</option>
+            <option value="newest">Newest first</option>
+            <option value="longest">Longest first</option>
+            <option value="shortest">Shortest first</option>
+            <option value="largest">Largest first</option>
+          </select>
+        </div>
+        <div id="musicResults"></div>
+        <div id="musicPager" class="mrow"></div>
+        <!-- One shared player. preload=none so opening step 4 does not start
+             fetching audio nobody asked for. -->
+        <audio id="musicAudio" preload="none"></audio>
         <div class="upl">
-          <input type="file" id="r_musicFile" accept="audio/*">
+          <input type="file" id="r_musicFile" accept="audio/*" multiple>
           <button id="musicUpload" type="button">Upload</button>
         </div>
         <div id="musicUpState" class="muted"></div>
-        <div id="musicList"></div>
         <p class="muted">Photos are silent, video clips are not. Two clips
           separated by four photos means five seconds of silence and then sound
           slamming back in. The audio lead and tail soften the two edges; they

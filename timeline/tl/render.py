@@ -292,38 +292,21 @@ def _jsonable(o):
             if isinstance(v, (str, int, float, bool, type(None)))}
 
 
-# Ket qua do nhip duoc nho lai theo (file, so lan sua doi): mot ban nhac cho ra
-# cung mot luoi phach mai mai, ma do nhip la giai ma ca bai + FFT — khong co ly gi
-# lam lai moi lan nguoi dung keo mot thanh truot o buoc xem truoc.
-_beat_cache = {}
-
-
 def beat_grid(o, s, total_s):
     """Luoi phach cho storyboard, hoac None. Dung chung boi xem truoc va render.
 
     total_s la do dai NHAM cua video: luoi phai phu het, va nhac ngan hon video
     thi beats.grid() noi tiep bang chinh chu ky trung binh.
+
+    Cache nam trong beats.py: trinh chon nhac cung can doc BPM, va hai ban sao
+    cua mot phep do ton 1-3 giay/bai se lech nhau roi chay hai lan.
     """
     if not o.get("beat_sync") or not o.get("music"):
         return None
     p = music.resolve(s, o["music"])
     if p is None:
         return None
-    try:
-        key = (str(p), p.stat().st_mtime_ns)
-    except OSError:
-        return None
-    hit = _beat_cache.get(key)
-    if hit is None:
-        hit = beatmod.detect(p, s)
-        _beat_cache[key] = hit
-        if hit[0]:
-            print(f"[render] nhip {p.name}: {len(hit[0])} phach, "
-                  f"{hit[1]:.0f} BPM")
-        else:
-            print(f"[render] khong tim ra nhip ro trong {p.name} "
-                  f"-> dung nhip ke chuyen thong thuong")
-    times, _bpm = hit
+    times, _bpm = beatmod.cached_detect(p, s)
     if not times:
         return None
     return beatmod.grid(times, max(1.0, float(total_s) * 1.5),
@@ -331,11 +314,10 @@ def beat_grid(o, s, total_s):
 
 
 def beat_info(o, s):
-    """BPM cua ban nhac dang chon, doc TU CACHE. None khi chua do duoc nhip.
+    """BPM cua ban nhac dang chon, doc TU CACHE. None khi chua do bao gio.
 
-    Tach ra thay vi cho beat_grid tra ve thêm mot gia tri: beat_grid da nap
-    cache truoc khi ham nay duoc goi, nen day chi la mot phep tra cuu — khong
-    giai ma lai ca bai, va khong ai phai doi chu ky cua beat_grid.
+    Chi tra cuu, khong bao gio tu do — beat_grid() da nap cache truoc khi ham
+    nay duoc goi trong luong storyboard.
 
     Can cho UI vi 'khong tim ra nhip ro' la ket qua BINH THUONG (piano tu do,
     tieng mua): render lui ve nhip ke chuyen va khong bao gi. Khong noi ra thi
@@ -346,11 +328,7 @@ def beat_info(o, s):
     p = music.resolve(s, o["music"])
     if p is None:
         return None
-    try:
-        key = (str(p), p.stat().st_mtime_ns)
-    except OSError:
-        return None
-    hit = _beat_cache.get(key)
+    hit = beatmod.peek(p)
     if hit is None:
         return None
     times, bpm = hit
@@ -1082,8 +1060,11 @@ def _mux_audio(video, shots, sb, o, s, work):
     """
     plan = []
     if o["audio"]:
+        # Clip khong co track tieng thi phai bo ra: mot input khong co audio se
+        # lam ca filter_complex that bai, keo theo mat tieng cua moi doan khac.
+        # Dung chung ham voi buoc kiem tra file upload — cung mot cau hoi.
         plan = [a for a in audio_plan(shots, sb, o, s)
-                if _has_audio(a["path"], s)]
+                if music.has_audio(a["path"], s)]
     total = sb["n_frames"] / float(sb["fps"])
 
     # Nhac doc lap voi tieng doan: video toan anh tinh (khong co doan nao co
@@ -1124,19 +1105,6 @@ def _mux_audio(video, shots, sb, o, s, work):
         print("[render] ghep tieng that bai, giu video im lang: " + _tail(log))
         return None
     return dst
-
-
-def _has_audio(path, s):
-    """Clip khong co track tieng thi phai bo ra: mot input khong co audio se lam
-    ca filter_complex that bai, keo theo mat tieng cua tat ca doan khac."""
-    try:
-        p = subprocess.run(
-            [s.ffprobe, "-v", "error", "-select_streams", "a:0",
-             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=20)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False                     # khong co ffprobe -> khong doan bua
-    return p.returncode == 0 and "audio" in (p.stdout or "")
 
 
 def _pipe(out, w, h, fps, o, s, work):
