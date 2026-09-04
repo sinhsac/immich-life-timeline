@@ -62,7 +62,7 @@ spec:
       containers:
         - name: web
           # Image do GitHub Actions build san, k3s pull truc tiep.
-          image: ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
+          image: ghcr.io/sinhsac/immich-life-timeline/fp-timeline:latest
           imagePullPolicy: Always
           ports:
             - name: http

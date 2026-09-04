@@ -35,7 +35,7 @@ x-host: &host
 services:
   # ------------------------------------------------------------------ web UI
   timeline:
-    image: ghcr.io/sinhsac/immich-plugin/fp-timeline:${TAG:-latest}
+    image: ghcr.io/sinhsac/immich-life-timeline/fp-timeline:${TAG:-latest}
     restart: unless-stopped
     <<: *host
     ports:
@@ -68,7 +68,7 @@ services:
   # KHONG chay cung 'docker compose up' vi day la job mot lan, khong phai
   # service thuong tru. Chay bang:  docker compose run --rm indexer
   indexer:
-    image: ghcr.io/sinhsac/immich-plugin/fp-indexer:${TAG:-latest}
+    image: ghcr.io/sinhsac/immich-life-timeline/fp-indexer:${TAG:-latest}
     profiles: ["job"]
     restart: "no"
     <<: *host
@@ -105,7 +105,7 @@ services:
   # user: root vi named volume tao ra thuoc root; file sinh ra la 644 nen
   # indexer (uid 10001) van doc duoc.
   models-face:
-    image: ghcr.io/sinhsac/immich-plugin/fp-indexer:${TAG:-latest}
+    image: ghcr.io/sinhsac/immich-life-timeline/fp-indexer:${TAG:-latest}
     profiles: ["setup"]
     restart: "no"
     user: "0:0"

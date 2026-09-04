@@ -6,8 +6,8 @@
 # hay that bai. Runner cua GitHub lam viec do trong vai phut.
 #
 # Ket qua:
-#   ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
-#   ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
+#   ghcr.io/sinhsac/immich-life-timeline/fp-indexer:latest
+#   ghcr.io/sinhsac/immich-life-timeline/fp-timeline:latest
 # kem tag theo commit sha va theo git tag.
 
 name: build images

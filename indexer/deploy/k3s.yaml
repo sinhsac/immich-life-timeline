@@ -66,7 +66,7 @@ spec:
             - name: indexer
               # Image do GitHub Actions build san, k3s pull truc tiep.
               # Doi 'latest' sang tag sha neu muon ghim ban cu the.
-              image: ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
+              image: ghcr.io/sinhsac/immich-life-timeline/fp-indexer:latest
               imagePullPolicy: Always
               args: ["--stage", "all"]
               envFrom:

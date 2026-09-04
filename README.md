@@ -1,7 +1,7 @@
 # One person's journey as a video, built from an Immich library
 
-[![build images](https://github.com/sinhsac/immich-plugin/actions/workflows/build-images.yml/badge.svg)](https://github.com/sinhsac/immich-plugin/actions/workflows/build-images.yml)
-[![release](https://img.shields.io/github/v/release/sinhsac/immich-plugin?sort=semver)](https://github.com/sinhsac/immich-plugin/releases/latest)
+[![build images](https://github.com/sinhsac/immich-life-timeline/actions/workflows/build-images.yml/badge.svg)](https://github.com/sinhsac/immich-life-timeline/actions/workflows/build-images.yml)
+[![release](https://img.shields.io/github/v/release/sinhsac/immich-life-timeline?sort=semver)](https://github.com/sinhsac/immich-life-timeline/releases/latest)
 [![license: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE.md)
 
 Pick one person from your [Immich](https://immich.app) library and this tool
@@ -139,8 +139,8 @@ Immich (Facial Recognition already run)
 The fastest route. Images are prebuilt on GHCR, nothing to build.
 
 ```bash
-git clone https://github.com/sinhsac/immich-plugin.git
-cd immich-plugin
+git clone https://github.com/sinhsac/immich-life-timeline.git
+cd immich-life-timeline
 cp .env.example .env
 # Edit .env: PG_PASSWORD and UPLOAD_LOCATION (or IMMICH_URL + IMMICH_API_KEY)
 
@@ -190,8 +190,8 @@ so two pods would trample each other.
 ## Images
 
 ```
-ghcr.io/sinhsac/immich-plugin/fp-indexer:latest
-ghcr.io/sinhsac/immich-plugin/fp-timeline:latest
+ghcr.io/sinhsac/immich-life-timeline/fp-indexer:latest
+ghcr.io/sinhsac/immich-life-timeline/fp-timeline:latest
 ```
 
 Available tags:
