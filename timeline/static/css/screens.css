@@ -1,0 +1,198 @@
+/* Bits that belong to one screen each. Grouped by screen so a change to the
+   music library cannot disturb the person picker. */
+
+/* ============================================================ person ==== */
+.grid{display:grid;gap:11px}
+.grid.people{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.grid.frames{grid-template-columns:repeat(auto-fill,minmax(108px,1fr))}
+
+.person{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);overflow:hidden;cursor:pointer;text-align:center;
+  box-shadow:var(--shadow-sm);transition:border-color .12s,box-shadow .12s,
+    transform .12s}
+.person:hover{border-color:var(--acc-line);box-shadow:var(--shadow-md);
+  transform:translateY(-1px)}
+.person img{width:100%;aspect-ratio:1;object-fit:cover;display:block;
+  background:var(--sunken)}
+.person .nm{padding:7px 7px 2px;font-size:12.5px;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.person .mt{padding:0 7px 9px;color:var(--muted);font-size:11px}
+.person .tick{position:absolute;top:7px;left:7px;width:21px;height:21px;
+  border-radius:50%;border:1px solid var(--line-strong);
+  background:rgba(255,255,255,.92);color:transparent;font-size:12px;
+  line-height:20px;text-align:center;box-shadow:var(--shadow-sm)}
+.person.on{border-color:var(--acc);
+  box-shadow:0 0 0 2px var(--acc-line),var(--shadow-md)}
+.person.on .tick{background:var(--acc);border-color:var(--acc);color:#fff}
+/* Suggested clusters get a green edge so they never blend into the main list. */
+.person.sug{border-color:#bfe3cd}
+.person.sug.on{border-color:var(--ok);box-shadow:0 0 0 2px #bfe3cd,var(--shadow-md)}
+.person.sug.on .tick{background:var(--ok);border-color:var(--ok)}
+.person .sim{position:absolute;top:7px;right:7px;background:var(--ok-soft);
+  border:1px solid #bfe3cd;border-radius:5px;padding:1px 7px;font-size:11.5px;
+  font-weight:650;color:var(--ok);font-variant-numeric:tabular-nums}
+.person .sim.clash{color:var(--warn);background:var(--warn-soft);
+  border-color:var(--warn-line)}
+.person .clashw{padding:0 8px 8px;font-size:11px;color:var(--warn);
+  font-weight:550}
+#simBox{border-top:1px solid var(--line);margin-top:24px;padding-top:6px}
+
+/* The selection bar is fixed to the viewport, so it must live INSIDE the person
+   screen: outside it, .screen{display:none} cannot hide it and it would float
+   over every other screen. */
+.pickbar{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;
+  z-index:50;background:var(--panel);border:1px solid var(--line-strong);
+  border-radius:13px;padding:12px 18px;box-shadow:var(--shadow-lg);
+  max-width:min(96vw,1180px);display:flex;flex-direction:column;gap:0}
+.pickbar .pi{min-width:158px;max-width:330px}
+.pickbar #pickInfo{font-size:13px}
+.pickbar #pickNames{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pickbar label{display:flex;flex-direction:column;font-size:12px;min-width:132px;
+  color:var(--muted);gap:2px}
+.pickbar button{background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);
+  padding:8px 14px;cursor:pointer;font-weight:550}
+.pickbar button:hover:not(:disabled){background:var(--sunken)}
+.pickbar button:disabled{opacity:.5;cursor:not-allowed}
+.pickbar button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+.pickbar button.primary:hover:not(:disabled){background:#1a5fd0}
+.subjrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+.pbmain{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.subjrow label.chk,.pbmain label.chk{flex-direction:row;align-items:center;
+  gap:7px;min-width:0;color:var(--muted)}
+#subjChips{display:inline-flex;gap:6px;flex-wrap:wrap}
+
+/* ============================================================= photos === */
+.chart{display:flex;gap:4px;align-items:flex-end;height:138px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:22px 14px 12px;box-shadow:var(--shadow-sm)}
+.chart div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;
+  position:relative;min-height:2px;opacity:.85}
+.chart div:hover{opacity:1}
+.chart div span{position:absolute;bottom:-18px;left:50%;
+  transform:translateX(-50%) rotate(-45deg);font-size:10px;color:var(--muted)}
+.chart div b{position:absolute;top:-16px;left:50%;transform:translateX(-50%);
+  font-size:10px;color:var(--fg-soft);font-weight:600;
+  font-variant-numeric:tabular-nums}
+
+/* ========================================================= thresholds === */
+/* Frame tiles. The border carries the state, so it has to be readable on a
+   light page: kept = green, dropped = grey and dimmed, hero = blue,
+   clip = purple. */
+.frame{position:relative;border:2px solid var(--line);border-radius:var(--r-sm);
+  overflow:hidden;cursor:pointer;background:var(--sunken);
+  transition:transform .12s,box-shadow .12s}
+.frame:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.frame img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.frame .dt{position:absolute;left:0;right:0;bottom:0;
+  background:linear-gradient(transparent,rgba(0,0,0,.78));color:#fff;
+  font-size:10.5px;font-weight:550;padding:11px 4px 3px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.frame.sel{border-color:var(--ok)}
+.frame.rej{border-color:var(--line-strong);opacity:.62;filter:saturate(.55)}
+.frame.rej:hover{opacity:1;filter:none}
+.frame .why{position:absolute;top:0;left:0;right:0;
+  background:rgba(198,47,47,.92);color:#fff;font-size:10px;padding:2px 4px;
+  line-height:1.3}
+.frame.hero{border-color:var(--acc)}
+.frame.clip{border-color:var(--clip)}
+.frame .heroTag,.frame .clipTag{position:absolute;top:0;left:0;color:#fff;
+  font-size:9.5px;font-weight:650;padding:2px 6px;border-radius:0 0 6px 0;
+  letter-spacing:.02em}
+.frame .heroTag{background:var(--acc)}
+.frame .clipTag{background:var(--clip);font-variant-numeric:tabular-nums}
+
+/* Kept photos are grouped by CHAPTER rather than shown as one flat grid: a
+   chapter holding a single photo tells you at once which period is thin. */
+.chapters{display:block}
+.chapHead{margin:20px 0 9px;padding-bottom:6px;
+  border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:9px}
+.chapHead b{font-size:14px;font-weight:650;letter-spacing:-.01em}
+.chapHead:first-child{margin-top:4px}
+.chapbars{margin:13px 0 4px}
+
+/* ============================================================= render === */
+.fprev{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:12px;margin:10px 0 18px}
+.fprev figure{margin:0;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow-sm)}
+.fprev img{display:block;width:100%;height:auto;background:var(--sunken)}
+.fprev figcaption{padding:7px 10px;color:var(--muted);font-size:12px;
+  font-variant-numeric:tabular-nums}
+
+/* ============================================================== music === */
+/* The chosen track, shown in the sidebar. With a searchable list you scroll away
+   from your choice, so it has to stay visible without hunting for a highlight. */
+.mpick{background:var(--sunken);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:9px 11px;margin:8px 0;font-size:12.5px;
+  line-height:1.6;word-break:break-all}
+.mpick b{font-weight:650}
+.mpick button{background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:5px;padding:1px 8px;
+  cursor:pointer;font-size:11.5px;margin-left:3px}
+.mpick button:hover{background:var(--acc-soft);border-color:var(--acc-line)}
+.mpick p.muted{margin:6px 0 0}
+
+.mrow{display:flex;gap:7px;align-items:center;margin:7px 0;flex-wrap:wrap}
+.mrow input[type=search]{flex:1;min-width:180px}
+.mrow select{flex:0 1 180px}
+.mrow button{background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:6px 12px;
+  cursor:pointer;font-weight:550;font-size:12.5px;white-space:nowrap}
+.mrow button:hover:not(:disabled){background:var(--sunken)}
+.mrow button:disabled{opacity:.5;cursor:not-allowed}
+#musicPager{justify-content:center;gap:10px}
+
+#musicResults{border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--panel);overflow:hidden}
+#musicResults:empty{display:none}
+#musicResults p.muted{margin:10px 12px}
+.mitem{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;
+  align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);
+  cursor:pointer}
+.mitem:last-child{border-bottom:0}
+.mitem:hover{background:var(--sunken)}
+.mitem.on{background:var(--acc-soft)}
+.mitem .mn{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.mitem.on .mn{font-weight:650;color:var(--acc)}
+.mitem .mm{font-size:11.5px;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.mitem button{border:1px solid var(--line-strong);background:var(--panel);
+  border-radius:5px;cursor:pointer;padding:2px 8px;font-size:11.5px;
+  color:var(--fg-soft);line-height:1.5}
+.mitem button.play:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mitem button.del{color:var(--bad)}
+.mitem button.del:hover{background:var(--bad-soft);border-color:#f3c4c1}
+#musicAudio{width:100%;max-width:520px;margin:10px 0}
+
+/* Upload: a drop target, because dragging a folder of tracks in is the whole
+   point of having it on its own screen. */
+.drop{border:2px dashed var(--line-strong);border-radius:var(--r);
+  background:var(--panel);padding:20px;text-align:center;margin:12px 0;
+  transition:background .12s,border-color .12s}
+.drop.over{border-color:var(--acc);background:var(--acc-soft)}
+.drop input[type=file]{display:block;margin:10px auto 0;max-width:420px;
+  font-size:12px;color:var(--muted);background:var(--sunken);
+  border:1px solid var(--line-strong);border-radius:6px;padding:6px 8px}
+.drop input[type=file]::file-selector-button{font:inherit;font-size:12px;
+  background:var(--panel);color:var(--fg-soft);
+  border:1px solid var(--line-strong);border-radius:5px;padding:4px 10px;
+  margin-right:9px;cursor:pointer}
+.drop .upl{display:flex;gap:9px;justify-content:center;align-items:center;
+  margin-top:11px;flex-wrap:wrap}
+.drop button{background:var(--acc);color:#fff;border:1px solid var(--acc);
+  border-radius:var(--r-sm);padding:7px 16px;cursor:pointer;font-weight:600;
+  font-size:13px}
+.drop button:hover:not(:disabled){background:#1a5fd0}
+.drop button:disabled{opacity:.5;cursor:not-allowed}
+#musicUpState:empty{display:none}
+#musicUpState{margin:4px 0 8px}
+
+/* ========================================================= statistics === */
+#steps button.warnDot::after{content:"";display:inline-block;width:6px;
+  height:6px;border-radius:50%;background:var(--ok);margin-left:7px;
+  vertical-align:middle}
+#idxBars{margin:14px 0 6px}
+table.runs td{font-variant-numeric:tabular-nums}

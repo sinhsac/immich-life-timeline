@@ -442,6 +442,53 @@ borders" it prioritises covering the frame — the face ends up slightly off
 `eye_y`. Switch to `fill=blur` if you would rather keep the whole photo and accept
 a blurred background where it falls short.
 
+## The interface
+
+One page, three fixed regions:
+
+- **Top bar** — screen navigation and the expert toggle. Fixed, so it never
+  scrolls away.
+- **Left panel** — every tuning control, in collapsible groups. The groups
+  belonging to the screen you are on open and highlight; the rest collapse rather
+  than disappear, so controls never move between screens. On a narrow window it
+  becomes a drawer behind the ☰ button, because stacking twenty collapsed groups
+  above the content is worse than hiding them.
+- **Content** — one screen at a time: Person · Photos · Thresholds · Render ·
+  Video, plus **Music** and **Statistics** as screens of their own.
+
+Screens stay mounted once built and are hidden with a class, so switching away and
+back does not throw away a filled photo grid or your scroll position. The panel is
+built **once** at boot no matter which screen is open: `readFilterUI()` and
+`renderOpts()` look controls up by id, so the controls have to exist even while you
+are looking at something else.
+
+### No framework, on purpose
+
+```
+static/
+  index.html          the three regions, and nothing else
+  css/   base · layout · components · screens
+  js/
+    core/   dom · api · state · router
+    screens/  people · photos · thresholds · render · video · music · stats
+    app.js  boot
+```
+
+Native ES modules, no bundler, **no build step**. The reasoning is specific rather
+than ideological: this service ships as a Python container whose Dockerfile is
+`pip install` plus `COPY static/`. A framework would add a second toolchain to that
+image — `node`, `npm ci`, a build stage — on a project that already retries pip
+because the target machine's network drops wheel downloads. Next and Nuxt would
+also bring SSR, which is meaningless when the backend is FastAPI.
+
+And the problem worth solving was **file size**, not missing reactivity: one
+1400-line script and one 600-line stylesheet. Splitting by screen fixes exactly
+that, and keeps a property that matters for a homelab tool — edit a file on the
+host, reload, done.
+
+If reactivity ever becomes the bottleneck, `vue.esm-browser.js` drops in without a
+bundler too, so nothing here forecloses that.
+
 ## Architecture
 
 ```

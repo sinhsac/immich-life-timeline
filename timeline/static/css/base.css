@@ -1,0 +1,68 @@
+/* fp-timeline — design tokens, reset, typography.
+   Nothing here knows about layout or any single screen, so this file is the only
+   one you touch to restyle the whole app. */
+:root{
+  /* surfaces, from furthest back to closest */
+  --bg:#f4f6f8;          /* page */
+  --panel:#ffffff;       /* cards, sidebars, popovers */
+  --sunken:#f0f2f5;      /* inputs, track backgrounds, table headers */
+  --line:#dfe3e8;        /* hairlines */
+  --line-strong:#c6ccd4; /* borders that must read as an edge */
+
+  /* text */
+  --fg:#171a1f;
+  --fg-soft:#3d4450;
+  --muted:#6a7280;
+
+  /* accents. One blue for "the app is talking to you", green for kept,
+     red for dropped, amber for "this is fine but read it". */
+  --acc:#1f6feb;
+  --acc-soft:#eaf1fe;
+  --acc-line:#b6d0fb;
+  --ok:#1a7f4b;
+  --ok-soft:#e8f6ee;
+  --bad:#c62f2f;
+  --bad-soft:#fdeceb;
+  --warn:#8a5a00;
+  --warn-soft:#fdf5e3;
+  --warn-line:#f0d9a3;
+  --clip:#7b3fe4;        /* video clips: a third category, needs its own hue */
+
+  --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+  --shadow-md:0 4px 12px rgba(16,24,40,.08);
+  --shadow-lg:0 12px 32px rgba(16,24,40,.16);
+  --r:10px;
+  --r-sm:7px;
+
+  /* Layout constants shared by layout.css and the drawer behaviour. Kept here
+     so the sidebar width is one number rather than three. */
+  --topbar-h:54px;
+  --side-w:360px;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+    "Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+
+/* Everything focusable gets the same ring. Cheaper than remembering it per
+   component, and keyboard users get a consistent target. */
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:4px}
+
+h1{margin:0;font-size:15px;font-weight:650;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:9px;white-space:nowrap}
+h1::before{content:"";width:5px;height:17px;border-radius:3px;
+  background:var(--acc);flex:none}
+h2{margin:0 0 4px;font-size:19px;font-weight:680;letter-spacing:-.01em}
+h3{margin:22px 0 9px;font-size:11.5px;font-weight:650;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--muted)}
+
+.muted{color:var(--muted);font-size:12.5px}
+.hide{display:none !important}
+.bad{color:var(--bad)}
+a{color:var(--acc)}
+code{background:var(--sunken);border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;font-size:12px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}

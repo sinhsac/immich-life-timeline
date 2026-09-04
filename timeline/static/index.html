@@ -4,610 +4,73 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Life journey video — fp-timeline</title>
-<link rel="stylesheet" href="style.css">
+<!-- Separate files rather than one sheet, and plain <link> rather than @import:
+     @import serialises the requests, several links load in parallel. -->
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/screens.css">
 </head>
 <body>
 
-<header>
+<!-- ============================================================ top bar ===
+     Fixed, and it holds only NAVIGATION plus the few things that must be
+     reachable from every screen. Every tuning control lives in the left panel,
+     which is what buys that panel enough room to be readable. -->
+<header id="topbar">
+  <button id="sideToggle" class="hamb" title="Show or hide the settings panel"
+          aria-label="Toggle settings panel">☰</button>
   <h1>Life journey video</h1>
   <nav id="steps">
-    <button data-step="1" class="on">Select person</button>
+    <button data-step="1" class="on">Person</button>
     <button data-step="5" disabled>Video</button>
-    <!-- These three steps appear ONLY in expert mode (hidden by CSS via
-         body.expert). The default path is: pick a person -> get a video,
-         with nothing to configure. -->
-    <button data-step="2" class="adv" disabled>Selected photos</button>
+    <!-- These appear ONLY in expert mode, via body.expert in CSS. The default
+         path is: pick a person -> get a video, with nothing to configure. -->
+    <button data-step="2" class="adv" disabled>Photos</button>
     <button data-step="3" class="adv" disabled>Thresholds</button>
-    <button data-step="4" class="adv" disabled>Render settings</button>
-    <!-- No data-step: step() skips it, so it is always clickable and it never
-         takes part in the progressive unlocking of the steps. -->
+    <button data-step="4" class="adv" disabled>Render</button>
+    <!-- No data-step, so step() skips them: always clickable, and they never
+         take part in the progressive unlocking. -->
+    <button id="navMusic" class="aside">Music</button>
     <button id="navStats" class="aside">Statistics</button>
-    <label class="expertToggle" title="Reopen the per-stage tuning steps">
-      <input type="checkbox" id="expert"> Expert
-    </label>
   </nav>
-  <div id="health" class="muted"></div>
+  <label class="expertToggle" title="Reopen the per-stage tuning steps">
+    <input type="checkbox" id="expert"> Expert
+  </label>
 </header>
 
-<main>
+<!-- Scrim behind the drawer on narrow screens: tapping outside closes it. -->
+<div id="scrim"></div>
 
-<!-- ================================================== 1. select person -->
-<section id="s1" class="step on">
-  <div class="bar">
-    <label>At least <input id="minReady" type="number" value="10" min="1" max="9999"> processed photos</label>
-    <button id="reload">Reload</button>
-    <span id="peopleCount" class="muted"></span>
-  </div>
-  <p class="muted">Immich usually splits <b>one person</b> into <b>several
-    clusters</b> across different ages. Select every cluster belonging to the
-    same person, then use "Find clusters of the same person" to widen the net
-    step by step.</p>
-  <div id="people" class="grid people"></div>
+<div id="shell">
 
-  <div id="simBox" class="hide">
-    <div class="bar">
-      <h3 id="simHead">Clusters that look like the same person</h3>
-      <button id="pickAllSug">Select all suggestions</button>
-      <button id="hideSug">Close</button>
+  <!-- ========================================================= left panel ===
+       One persistent panel of collapsible groups instead of a different sidebar
+       per step. Two reasons it is better here: the controls stop moving around
+       between screens, and readFilterUI()/renderOpts() can read them from any
+       screen because they are always in the DOM. -->
+  <aside id="side" class="adv">
+    <div id="sideHead">
+      <span id="sideCtx" class="muted"></span>
     </div>
-    <div id="simNote" class="muted"></div>
-    <div class="warn">Close relatives still score 43–45%, so do not trust the
-      number on its own — look at the photos before selecting. Clusters flagged
-      <b>already named as someone else</b> are almost certainly a different
-      person and have been pushed to the bottom.</div>
-    <div id="simList" class="grid people"></div>
-  </div>
-
-  <!-- This bar must stay INSIDE section s1: it is position:fixed, so outside
-       the section .step{display:none} cannot hide it and it would float over
-       all four steps. -->
-  <div id="pickBar" class="pickbar hide">
-    <div id="subjRow" class="subjrow hide">
-      <span class="muted">Video of:</span>
-      <span id="subjChips"></span>
-      <label class="muted chk"><input type="checkbox" id="together">
-        only photos containing everyone</label>
-    </div>
-    <div class="pbmain">
-      <div class="pi">
-        <div id="pickInfo"></div>
-        <div id="pickNames" class="muted"></div>
-      </div>
-      <label class="muted">From <input type="date" id="dFrom"></label>
-      <label class="muted">To <input type="date" id="dTo"></label>
-      <label class="muted adv">Similarity ≥ <output id="o_minSim"></output>
-        <input type="range" id="minSim" min="0.15" max="0.8" step="0.05" value="0.3">
-      </label>
-      <button id="findSim">Find clusters of the same person</button>
-      <button id="addSubject">+ Add another person</button>
-      <button id="clearPick">Clear selection</button>
-      <button id="mkAdvanced" class="adv">Tune step by step →</button>
-      <button id="mkVideo" class="primary">Create video</button>
-    </div>
-  </div>
-</section>
-
-<!-- ==================================================== video (result) -->
-<!-- The default path ends here: no sliders, no thresholds. Turn on Expert if
-     you want to intervene. -->
-<section id="s5" class="step">
-  <div id="outHead"></div>
-  <div id="renderState"></div>
-  <video id="player" controls class="hide"></video>
-  <div class="bar" id="outBar">
-    <button id="shorter">Shorter</button>
-    <button id="longer">Longer</button>
-    <!-- Must carry the SAME options as #r_aspect in step 4: the two controls
-         mirror each other's value, and a missing option means the assignment
-         does not match and the select renders empty. -->
-    <label class="muted">Frame
-      <select id="o_aspect">
-        <option value="4:3" selected>4:3 landscape</option>
-        <option value="3:2">3:2 landscape</option>
-        <option value="16:9">16:9 landscape</option>
-        <option value="1:1">1:1 square</option>
-        <option value="3:4">3:4 portrait</option>
-        <option value="9:16">9:16 portrait (phone)</option>
-      </select></label>
-    <button id="reRender" class="primary">Re-render</button>
-    <button id="toExpert">Expert tuning →</button>
-  </div>
-  <div id="outStory"></div>
-  <h3 class="adv">Previous renders</h3>
-  <div id="renderList" class="adv"></div>
-</section>
-
-<!-- ================================================= 2. selected photos -->
-<section id="s2" class="step">
-  <div id="projHead"></div>
-  <div class="cards">
-    <div class="card"><b id="n_candidate">0</b><span>photos of this person</span></div>
-    <div class="card"><b id="n_pass">0</b><span>pass the pose thresholds</span></div>
-    <div class="card ok"><b id="n_selected">0</b><span>in the video</span></div>
-    <div class="card"><b id="n_years">0</b><span>years covered</span></div>
-  </div>
-  <h3>Distribution by year</h3>
-  <div id="chart" class="chart"></div>
-  <div id="gaps"></div>
-  <div class="bar"><button id="toStep3" class="primary">Tune the pose thresholds →</button></div>
-</section>
-
-<!-- ====================================================== 3. thresholds -->
-<section id="s3" class="step">
-  <div class="split">
-    <aside id="filters">
-      <h3>Storytelling</h3>
-      <label>Video style
-        <select id="f_mode">
-          <option value="story" selected>Story — chapters with hero shots</option>
-          <option value="even">Even spread — one frame per photo (legacy)</option>
-        </select></label>
-      <div id="storyOpts">
-        <label class="chk"><input type="checkbox" id="f_auto_len" checked>
-          Infer the duration from the data</label>
-        <p class="muted">By default the duration is an <b>outcome</b>, not a
-          request: chapters with more photos get more screen time, and a longer
-          journey gets more chapters. Untick this to force a number.</p>
-        <label id="lenWrap" class="off">Target duration
-          <output id="o_target_seconds"></output> s
-          <input type="range" id="f_target_seconds" min="15" max="240" step="5"></label>
-        <label>Pacing
-          <select id="f_pace">
-            <option value="slow">Slow — time to take it in</option>
-            <option value="normal" selected>Normal</option>
-            <option value="quick">Quick</option>
-            <option value="snap">Very quick</option>
-          </select></label>
-        <label>One chapter covers
-          <select id="f_chapter_by">
-            <option value="auto" selected>Auto — based on the span of the journey</option>
-            <option value="years2">Two years</option>
-            <option value="year">One year</option>
-            <option value="half">Half a year</option>
-            <option value="quarter">One quarter</option>
-            <option value="month">One month</option>
-          </select></label>
-        <label>At most <output id="o_max_per_chapter"></output> photos per chapter
-          <input type="range" id="f_max_per_chapter" min="1" max="16" step="1"></label>
-        <p class="muted"><b>The photo count follows from the duration</b>, not the
-          other way around. Every chapter always gets at least one photo so no
-          stretch of time disappears, and each chapter's highest-scoring photo is
-          held longer as the hero shot.</p>
-      </div>
-
-      <h3>Head pose</h3>
-      <label class="chk"><input type="checkbox" id="f_soft_pose" checked>
-        Score the pose instead of rejecting on it</label>
-      <p class="muted" id="softNote"></p>
-      <label>Max head turn <output id="o_max_yaw"></output>°
-        <input type="range" id="f_max_yaw" min="5" max="60" step="1"></label>
-      <label>Max tilt up/down <output id="o_max_pitch"></output>°
-        <input type="range" id="f_max_pitch" min="5" max="50" step="1"></label>
-      <label>Max sideways tilt <output id="o_max_roll"></output>°
-        <input type="range" id="f_max_roll" min="5" max="60" step="1"></label>
-      <label>Min frontality <output id="o_min_frontality"></output>
-        <input type="range" id="f_min_frontality" min="0" max="1" step="0.05"></label>
-      <label>Eye-openness threshold (EAR) <output id="o_min_ear"></output>
-        <input type="range" id="f_min_ear" min="0" max="0.35" step="0.01"></label>
-      <p class="muted">EAR stays a hard gate either way — a photo with the eyes
-        shut cannot be rescued by any amount of sharpness.</p>
-
-      <details class="sub">
-        <summary>Hard limits — where a photo is rejected outright</summary>
-        <p class="muted">With scoring on, the sliders above are only
-          <b>knees</b>. These are the walls. The default used to cut at 22° of
-          head turn, and 22° is still very nearly looking straight at the lens:
-          photos of someone grinning back over their shoulder, mid-run, blowing
-          out candles were thrown away before they were ever scored, and what
-          survived was passport shots.</p>
-        <label>Reject past <output id="o_hard_yaw"></output>° of head turn
-          <input type="range" id="f_hard_yaw" min="10" max="90" step="1"></label>
-        <label>Reject past <output id="o_hard_pitch"></output>° of tilt up/down
-          <input type="range" id="f_hard_pitch" min="10" max="80" step="1"></label>
-        <label>Reject past <output id="o_hard_roll"></output>° of sideways tilt
-          <input type="range" id="f_hard_roll" min="10" max="90" step="1"></label>
-        <label>Reject below frontality <output id="o_hard_frontality"></output>
-          <input type="range" id="f_hard_frontality" min="0" max="1"
-                 step="0.05"></label>
-        <label>Reject below sharpness <output id="o_hard_sharp"></output>
-          <input type="range" id="f_hard_sharp" min="0" max="200" step="2"></label>
-        <p class="muted">The server keeps every wall on the far side of its own
-          knee, so an inconsistent pair is corrected rather than inverting the
-          score.</p>
-      </details>
-
-      <h3>Image quality</h3>
-      <label>Min face size <output id="o_min_eye_ratio"></output> of the long edge
-        <input type="range" id="f_min_eye_ratio" min="0" max="0.15" step="0.005"></label>
-      <label>Min sharpness <output id="o_min_sharp"></output>
-        <input type="range" id="f_min_sharp" min="0" max="400" step="10"></label>
-
-      <h3>Smiling</h3>
-      <label class="chk"><input type="checkbox" id="f_prefer_smile" checked>
-        Give smiling photos a higher score</label>
-      <p class="muted">Everything else here measures a <b>technically clean
-        face</b>; nothing measured whether the moment was worth keeping. A smile
-        is the closest this metric set gets to "a moment", and it is the largest
-        single bonus in the score — a photo turned 35° with a broad smile now
-        outscores a dead-straight, unsmiling one.</p>
-      <div id="smileNote"></div>
-      <label>Reject below smile <output id="o_min_smile"></output>
-        <input type="range" id="f_min_smile" min="0" max="0.9" step="0.05"></label>
-      <p class="muted">Leave at 0. A solemn portrait is part of the story too, so
-        this is off by default and the preference is applied by adding points
-        rather than by rejecting.</p>
-
-      <h3>Duplicate shots</h3>
-      <label>Photos within <output id="o_dedup_seconds"></output> s are one moment
-        <input type="range" id="f_dedup_seconds" min="0" max="60" step="1"></label>
-      <p class="muted">Bursts collapse to their best frame. 0 turns it off. A
-        burst is capped at three times this figure, so a whole afternoon of
-        photos taken 5 s apart does not shrink to a single frame. Video clips are
-        never collapsed — they all share the video's timestamp, and the indexer
-        already guaranteed they do not overlap.</p>
-
-      <h3>Video clips</h3>
-      <label class="chk"><input type="checkbox" id="f_use_clips" checked>
-        Splice in real video clips</label>
-      <p class="muted">The indexer job scans every video frame, finds the person
-        you selected, then cuts out the best clip. Any chapter that has a clip
-        gets one slot for it — a moving clip is worth more than a photo that is
-        only marginally better.</p>
-      <label>Max shake <output id="o_max_clip_motion"></output>
-        <input type="range" id="f_max_clip_motion" min="0.5" max="8" step="0.1"></label>
-      <p class="muted">Measured in "face widths per second" — divided by face
-        size, not frame size, because a large face moving 50 px is normal while a
-        small face moving 50 px is a jump cut. High accepts shaky handheld
-        footage, low keeps only genuinely steady clips.</p>
-      <label>Drop clips shorter than <output id="o_min_clip_seconds"></output> s
-        <input type="range" id="f_min_clip_seconds" min="0" max="4"
-               step="0.1"></label>
-      <div id="clipNote"></div>
-
-      <h3>Other people in the photo</h3>
-      <label class="chk"><input type="checkbox" id="f_allow_others">
-        Accept photos containing other people</label>
-      <label>Max faces per photo (0 = no limit)
-        <input type="number" id="f_max_faces" min="0" max="30" step="1"></label>
-
-      <h3>Body pose</h3>
-      <label class="chk"><input type="checkbox" id="f_use_body">
-        Use body pose data</label>
-      <div id="bodyOpts">
-        <div class="chips" id="c_postures"></div>
-        <div class="chips" id="c_orientations"></div>
-        <label class="chk"><input type="checkbox" id="f_allow_missing_body">
-          Accept photos with no body detected</label>
-      </div>
-
-      <div id="evenOpts" class="hide">
-        <h3>Even spread over time</h3>
-        <label>Every <output id="o_bucket_days"></output> days, take
-          <output id="o_per_bucket"></output> photos
-          <input type="range" id="f_bucket_days" min="7" max="365" step="1">
-          <input type="range" id="f_per_bucket" min="1" max="6" step="1"></label>
-      </div>
-
-      <div class="bar">
-        <button id="apply" class="primary">Apply</button>
-        <button id="resetF">Defaults</button>
-      </div>
+    <div id="sideBody"></div>
+    <div id="sideFoot">
+      <button id="apply" class="primary">Apply</button>
+      <button id="resetF">Defaults</button>
+      <button id="render" class="primary">Render</button>
       <div id="applying" class="muted"></div>
-    </aside>
-
-    <div id="results">
-      <div class="cards small">
-        <div class="card ok"><b id="r_selected">0</b><span>in the video</span></div>
-        <div class="card"><b id="r_rejected">0</b><span>rejected</span></div>
-      </div>
-      <div id="storyInfo"></div>
-      <div id="reasons"></div>
-      <div class="tabs">
-        <button data-tab="sel" class="on">Photos in the video</button>
-        <button data-tab="rej">Rejected photos</button>
-      </div>
-      <p class="muted" id="tabHint"></p>
-      <div id="gridSel" class="grid frames"></div>
-      <div id="gridRej" class="grid frames hide"></div>
-      <div class="bar"><button id="toStep4" class="primary">Render the video →</button></div>
-    </div>
-  </div>
-</section>
-
-<!-- ================================================= 4. render settings -->
-<section id="s4" class="step">
-  <div class="split">
-    <aside>
-      <h3>Framing</h3>
-      <label>Aspect ratio
-        <select id="r_aspect">
-          <option value="4:3" selected>4:3 landscape</option>
-          <option value="3:2">3:2 landscape</option>
-          <option value="16:9">16:9 landscape</option>
-          <option value="1:1">1:1 square</option>
-          <option value="3:4">3:4 portrait</option>
-          <option value="9:16">9:16 portrait (phone)</option>
-        </select></label>
-      <label>Long edge
-        <select id="r_size">
-          <option value="720">720</option>
-          <option value="900" selected>900</option>
-          <option value="1080">1080</option>
-          <option value="1440">1440</option>
-        </select></label>
-      <label>Face width <output id="o_face_frac"></output> of the frame width
-        <input type="range" id="r_face_frac" min="0.05" max="0.6" step="0.01"
-               value="0.12"></label>
-      <p class="muted">Small keeps the whole person and the surroundings, large
-        turns it into a tight portrait. The face is only the anchor that stops
-        the video from jumping.</p>
-      <label>Vertical eye position <output id="o_eye_y"></output>
-        <input type="range" id="r_eye_y" min="0.15" max="0.75" step="0.01"
-               value="0.33"></label>
-      <p class="muted">Lower it to show more headroom, raise it to show more of
-        the body.</p>
-      <label>When the photo does not fill the frame
-        <select id="r_fill">
-          <option value="crop" selected>Scale up to cover, cut the edges</option>
-          <option value="blur">Keep the whole photo, blurred background</option>
-        </select></label>
-      <label class="chk"><input type="checkbox" id="r_level" checked>
-        Rotate so the eyes are level</label>
-
-      <details class="sub">
-        <summary>Advanced framing</summary>
-        <label>Horizontal eye position <output id="o_anchor_x"></output>
-          <input type="range" id="r_anchor_x" min="0.2" max="0.8" step="0.01"
-                 value="0.5"></label>
-        <label>Two people: distance between them
-          <output id="o_pair_frac"></output> of the frame width
-          <input type="range" id="r_pair_frac" min="0.08" max="0.8" step="0.01"
-                 value="0.30"></label>
-        <p class="muted">Only used on photos holding two of the selected people.
-          The two eye centres are <b>not</b> treated as one pair of eyes — a tall
-          parent and a short child are 30° apart and levelling that wrecks the
-          photo. Instead two virtual points are placed on a horizontal line the
-          real distance apart, so the further apart they stand the wider the
-          framing opens. Photos with only one of them still anchor normally on
-          that one face.</p>
-        <label>Encoding quality (CRF) <output id="o_crf"></output>
-          <input type="range" id="r_crf" min="14" max="32" step="1"
-                 value="20"></label>
-        <p class="muted">Lower is better looking and larger. 20 is visually
-          clean for this material.</p>
-      </details>
-
-      <h3>Editing style</h3>
-      <label>Style
-        <select id="r_mode">
-          <option value="story" selected>Story — chapters, hero shots, cross-fades</option>
-          <option value="flip">Even spread — one frame per photo (legacy)</option>
-        </select></label>
-
-      <div id="storyRender">
-        <label>Slow zoom within each shot
-          <select id="r_motion">
-            <option value="none">None — the photo stays still</option>
-            <option value="subtle" selected>Subtle</option>
-            <option value="normal">Normal</option>
-            <option value="strong">Strong</option>
-          </select></label>
-        <p class="muted">The zoom is centred on the midpoint between the eyes, so
-          the face stays in exactly one place — only the surrounding context
-          widens and narrows.</p>
-        <label class="chk"><input type="checkbox" id="r_title" checked>
-          Opening title card (name + year range)</label>
-        <label class="chk"><input type="checkbox" id="r_chapter_card" checked>
-          Show the chapter label when a new chapter starts</label>
-        <label>Birth year — if set, chapter labels also show the age
-          <input type="number" id="r_birth_year" min="1900" max="2100"
-                 placeholder="leave empty to skip"></label>
-        <label>Output fps
-          <select id="r_out_fps">
-            <option value="24" selected>24</option>
-            <option value="25">25</option>
-            <option value="30">30</option>
-          </select></label>
-
-        <h3>Audio from video clips</h3>
-        <label class="chk"><input type="checkbox" id="r_audio" checked>
-          Keep the real audio of each clip</label>
-        <p class="muted">Audio comes in <b>before</b> the picture and stays on
-          <b>after</b> the picture has cut away — the ear hears the new space
-          before the eye sees it, and it does not stop dead at the same instant
-          as the picture. Between clips there is silence, because still photos
-          have no sound.</p>
-        <label>Audio leads the picture by <output id="o_audio_lead"></output> s
-          <input type="range" id="r_audio_lead" min="0" max="2" step="0.1"
-                 value="0.5"></label>
-        <label>Audio stays on for <output id="o_audio_tail"></output> s after the cut
-          <input type="range" id="r_audio_tail" min="0" max="3" step="0.1"
-                 value="0.8"></label>
-        <label class="chk"><input type="checkbox" id="r_audio_normalize" checked>
-          Even out levels across clips</label>
-        <details class="sub">
-          <summary>Fades and level</summary>
-          <label>Fade in <output id="o_audio_fade_in"></output> s
-            <input type="range" id="r_audio_fade_in" min="0.02" max="2"
-                   step="0.01" value="0.35"></label>
-          <label>Fade out <output id="o_audio_fade_out"></output> s
-            <input type="range" id="r_audio_fade_out" min="0.02" max="3"
-                   step="0.01" value="0.6"></label>
-          <label>Gain <output id="o_audio_gain"></output> dB
-            <input type="range" id="r_audio_gain" min="-24" max="12" step="1"
-                   value="0"></label>
-          <p class="muted">A fade is never longer than half its own clip, so
-            these are ceilings rather than exact figures.</p>
-        </details>
-
-        <h3>Background music</h3>
-        <div id="musicNote"></div>
-        <!-- The chosen track lives in a hidden input rather than a <select>: a
-             thousand <option> rows is not a way to choose music, and everything
-             downstream (renderOpts, beat sync gating) already reads .value. -->
-        <input type="hidden" id="r_music" value="">
-        <div id="musicPick" class="mpick"></div>
-        <div class="mrow">
-          <input type="search" id="musicQ" placeholder="Search tracks…"
-                 autocomplete="off">
-          <button id="musicRandom" type="button" title="Pick one at random from
-            the current filter">Random</button>
-        </div>
-        <div class="mrow">
-          <select id="musicFolder"><option value="">All folders</option></select>
-          <select id="musicSort">
-            <option value="name" selected>By name</option>
-            <option value="newest">Newest first</option>
-            <option value="longest">Longest first</option>
-            <option value="shortest">Shortest first</option>
-            <option value="largest">Largest first</option>
-          </select>
-        </div>
-        <div id="musicResults"></div>
-        <div id="musicPager" class="mrow"></div>
-        <!-- One shared player. preload=none so opening step 4 does not start
-             fetching audio nobody asked for. -->
-        <audio id="musicAudio" preload="none"></audio>
-        <div class="upl">
-          <input type="file" id="r_musicFile" accept="audio/*" multiple>
-          <button id="musicUpload" type="button">Upload</button>
-        </div>
-        <div id="musicUpState" class="muted"></div>
-        <p class="muted">Photos are silent, video clips are not. Two clips
-          separated by four photos means five seconds of silence and then sound
-          slamming back in. The audio lead and tail soften the two edges; they
-          cannot fill the hole in between. Music is what holds a continuous bed
-          of sound under the whole thing — <b>a structural fix, not
-          decoration</b>.</p>
-        <p class="muted">Tracks are read from the <code>MUSIC_DIR</code>
-          directory on the server, mounted read-only. There is deliberately no
-          upload: the name ends up on an ffmpeg command line, so every check
-          lives in one place and nothing writes into that directory.</p>
-        <label>Music level <output id="o_music_gain"></output> dB
-          <input type="range" id="r_music_gain" min="-40" max="0" step="1"
-                 value="-14"></label>
-        <label>Duck by <output id="o_music_duck"></output> dB while clip audio plays
-          <input type="range" id="r_music_duck" min="-40" max="0" step="1"
-                 value="-11"></label>
-        <p class="muted">Ducking is computed, not compressed: the exact seconds
-          where real audio plays are already known before ffmpeg is called, so
-          the envelope is exact and identical between runs.</p>
-        <label>Music fades in over <output id="o_music_fade_in"></output> s
-          <input type="range" id="r_music_fade_in" min="0" max="8" step="0.1"
-                 value="1.2"></label>
-        <label>Music fades out over <output id="o_music_fade_out"></output> s
-          <input type="range" id="r_music_fade_out" min="0" max="10" step="0.1"
-                 value="2.5"></label>
-        <label class="chk"><input type="checkbox" id="r_music_loop" checked>
-          Loop the track if it is shorter than the video</label>
-
-        <label class="chk"><input type="checkbox" id="r_beat_sync">
-          Cut on the beat</label>
-        <p class="muted">This does not replace the hero/chapter structure, it
-          changes the <b>unit</b>: each shot keeps its natural length as the
-          target and the real boundary is pulled to the nearest beat. Expect the
-          duration to drift a little from the estimate — that is inherent to
-          snapping. Video clips are only ever snapped <b>down</b>, never up,
-          because snapping up would freeze the last frame mid-motion.</p>
-        <label>Cut every <output id="o_beat_every"></output> beat(s)
-          <input type="range" id="r_beat_every" min="1" max="8" step="1"
-                 value="1"></label>
-        <p class="muted">At 140 BPM a single beat is 0.43 s, too fast for a
-          memory video — try 2. Beat detection can also report half the real
-          tempo, which this compensates for.</p>
-
-        <details class="sub">
-          <summary>Advanced timing</summary>
-          <label class="chk"><input type="checkbox" id="r_arc" checked>
-            Run the first and last chapters 12% slower</label>
-          <p class="muted">A story needs room to be entered and room to be let
-            go of.</p>
-          <label>Title card held <output id="o_title_seconds"></output> s
-            <input type="range" id="r_title_seconds" min="0" max="8" step="0.1"
-                   value="2.4"></label>
-          <p class="muted">The title sits <b>on top of</b> the first photo, not
-            on its own black screen. If the first shot is a video clip it is not
-            extended for the card either — that would show a frozen frame before
-            the clip starts moving.</p>
-          <label>Chapter label held <output id="o_card_seconds"></output> s
-            <input type="range" id="r_card_seconds" min="0.4" max="6" step="0.1"
-                   value="1.8"></label>
-          <label>Fade in from black <output id="o_intro_s"></output> s
-            <input type="range" id="r_intro_s" min="0" max="4" step="0.1"
-                   value="0.8"></label>
-          <label>Hold, then fade to black <output id="o_outro_s"></output> s
-            <input type="range" id="r_outro_s" min="0" max="6" step="0.1"
-                   value="1.6"></label>
-          <label class="chk"><input type="checkbox" id="r_xfade_auto" checked>
-            Cross-fade length follows the pacing</label>
-          <label id="xfWrap" class="off">Cross-fade
-            <output id="o_xfade"></output> s
-            <input type="range" id="r_xfade" min="0" max="2" step="0.01"
-                   value="0.5"></label>
-          <p class="muted">0 means hard cuts, which is a real choice and not the
-            same thing as leaving it unset. A cross-fade never lengthens the
-            video: it overlaps the tail of the shot before it.</p>
-        </details>
-      </div>
-
-      <div id="flipRender" class="hide">
-        <label>Photos per second <output id="o_fps"></output>
-          <input type="range" id="r_fps" min="1" max="24" step="1" value="6"></label>
-        <label>Smoothing
-          <select id="r_smooth">
-            <option value="blend" selected>Blend (smooth)</option>
-            <option value="none">None (hard cuts)</option>
-          </select></label>
-      </div>
-
-      <label>Time label in the lower corner
-        <select id="r_label">
-          <option value="none" selected>None — the chapter labels already say when</option>
-          <option value="year">Year</option>
-          <option value="month">Year-month</option>
-          <option value="date">Full date</option>
-        </select></label>
-      <div class="bar">
-        <button id="render" class="primary">Render the video</button>
-      </div>
       <p class="muted" id="renderEst"></p>
-    </aside>
-    <div>
-      <h3>Story structure</h3>
-      <p class="muted">Computed with the exact algorithm the render step uses, so
-        the durations below are real numbers rather than estimates.</p>
-      <div id="sbInfo"></div>
-      <h3>Framing preview — exactly what the video will look like</h3>
-      <p class="muted">Three photos spread far apart in time. The face has to
-        land in the same place in all three; everything else is the context you
-        get to keep.</p>
-      <div id="framePreview" class="fprev"></div>
     </div>
-  </div>
-</section>
+  </aside>
 
-<!-- ================================================= indexer statistics -->
-<!-- A page of its own, outside the four-step flow. This block used to sit in
-     the header, where it took up room across all four steps even collapsed. -->
-<section id="sStats" class="step">
-  <div class="bar">
-    <h3>Indexing progress</h3>
-    <button id="statsReload">Reload</button>
-    <span id="statsAt" class="muted"></span>
-  </div>
-  <p class="muted">The indexer job runs outside this service (its own CronJob),
-    so this is only a read of the state columns in <code>fp_asset</code>.</p>
+  <main id="view">
+    <div id="health" class="muted"></div>
+    <div id="screens"></div>
+  </main>
 
-  <div id="idxCards" class="cards"></div>
-  <div id="idxBars"></div>
-
-  <h3>Recent runs</h3>
-  <div id="idxRuns"></div>
-</section>
-
-</main>
+</div>
 
 <div id="toast"></div>
-<script src="app.js"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>
