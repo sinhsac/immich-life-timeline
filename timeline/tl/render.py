@@ -330,6 +330,36 @@ def beat_grid(o, s, total_s):
                         o.get("beat_every", 1))
 
 
+def beat_info(o, s):
+    """BPM cua ban nhac dang chon, doc TU CACHE. None khi chua do duoc nhip.
+
+    Tach ra thay vi cho beat_grid tra ve thêm mot gia tri: beat_grid da nap
+    cache truoc khi ham nay duoc goi, nen day chi la mot phep tra cuu — khong
+    giai ma lai ca bai, va khong ai phai doi chu ky cua beat_grid.
+
+    Can cho UI vi 'khong tim ra nhip ro' la ket qua BINH THUONG (piano tu do,
+    tieng mua): render lui ve nhip ke chuyen va khong bao gi. Khong noi ra thi
+    nguoi dung bat 'cat theo phach' roi khong hieu vi sao khong co gi doi.
+    """
+    if not o.get("music"):
+        return None
+    p = music.resolve(s, o["music"])
+    if p is None:
+        return None
+    try:
+        key = (str(p), p.stat().st_mtime_ns)
+    except OSError:
+        return None
+    hit = _beat_cache.get(key)
+    if hit is None:
+        return None
+    times, bpm = hit
+    if not times:
+        return {"found": False, "bpm": None, "n_beat": 0}
+    return {"found": True, "bpm": round(float(bpm or 0.0), 1),
+            "n_beat": len(times)}
+
+
 def _storyboard(fr, o, s):
     """storyboard() co bam nhip. Hai buoc vi luoi phach can biet do dai nham.
 
@@ -366,6 +396,12 @@ def plan_for(project_id, over=None):
         "n_hero": sb["n_hero"], "n_clip": sb["n_clip"], "n_missing": n_missing,
         "pace": sb["pace"], "target_seconds": sb["target_seconds"],
         "n_beat_snap": sb.get("n_beat_snap", 0),
+        # Tra ve ten bai ma SERVER da chap nhan, khong phai ten client gui len.
+        # options() am tham bo mot ten khong phan giai duoc (co y: mot cai ten
+        # sai khong nen lam that bai ca lan render), nen day la cach duy nhat de
+        # UI biet no da bi bo va noi cho nguoi dung.
+        "music": o.get("music"), "beat_sync": bool(o.get("beat_sync")),
+        "beat_every": o.get("beat_every", 1), "beat": beat_info(o, s),
         "text_backend": textdraw.backend(),
         "chapters": sb["chapters"],
         "shots": [{"asset_id": sh["asset_id"], "fidx": sh["fidx"],

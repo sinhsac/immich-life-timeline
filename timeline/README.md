@@ -194,11 +194,22 @@ what holds a continuous bed of sound under the whole thing — that is a structu
 fix, not decoration, and it is the reason to add it before anything to do with
 beats.
 
-Point `MUSIC_DIR` at a directory of tracks (mounted read-only), then pass the
-track name when rendering. `GET /api/music` lists what is there. The name is
-always **relative** to `MUSIC_DIR`; `tl/music.py` rejects absolute paths, `..`
-segments, and anything that resolves outside the directory after symlinks — the
-name comes from the client and ends up on an ffmpeg command line.
+Point `MUSIC_DIR` at a directory of tracks (mounted read-only) and the tracks
+appear in a dropdown in step 4, refreshed each time you open that step so
+dropping a file into the directory needs no browser reload. `GET /api/music`
+lists the same thing.
+
+**There is no upload, deliberately.** The name comes from the client and ends up
+on an ffmpeg command line, so every check lives in one place — `tl/music.py`
+rejects absolute paths, `..` segments, and anything that resolves outside the
+directory after symlinks — and nothing in the service can write into that
+directory. Adding a track means copying a file onto the host. That is one fewer
+write path in a service that ships with no authentication.
+
+An unresolvable name is **dropped rather than raising**, because one bad name
+should not fail a whole render. Silent on the server would be silent for the
+user too, so step 4 says so explicitly when the track it sent back does not
+match the one selected.
 
 | Parameter | Default | Notes |
 |---|---|---|
@@ -306,6 +317,19 @@ Indexing progress lives on its own **Statistics page** on the nav bar. It used t
 sit in the header, where it took up room across all four steps even when
 collapsed. The nav label shows the overall percentage so you know when it is worth
 opening, plus a green dot while a stage is running.
+
+All five stages appear there, `clips` included. It is worth stating why that
+matters: `clips` is the most expensive stage in the whole job by a wide margin,
+and for a long time it was the only one the page said nothing about — every
+figure it needed was already sitting in `fp_asset`, just never read. Its
+denominator is the **number of videos**, not the number of assets: a library of
+20,000 photos and 500 videos reads 2% forever if you divide by the wrong total.
+The `smiles` stage is counted against the number of faces that have landmarks,
+since that is what it derives the score from.
+
+The two features that can be switched on while the data behind them does not yet
+exist — smile preference and video clips — say so where the switch is rather than
+quietly doing nothing.
 
 Run this after `../indexer` has finished. The service **loads no ML models at
 all** — alignment uses the `kps` already stored in `fp_face`, so RAM stays around

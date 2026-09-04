@@ -16,7 +16,7 @@ Sau khi loc con phai QUYET DINH LAY ANH NAO. Hai che do:
                 lay per_bucket anh diem cao nhat. Thoi luong = so anh / fps,
                 khong kiem soat duoc. Giu lai cho ai muon toan quyen.
 """
-from . import story
+from . import db, story
 from .db import rows
 from .settings import get
 
@@ -239,15 +239,15 @@ def fetch(subjects, date_from=None, date_to=None, together=False,
         cur.execute(_FETCH.format(
             face=s.table("face"), asset=s.table("asset"),
             body=s.table("body"),
-            face_smile=("f.smile" if _has_col(cur, s, "face", "smile")
+            face_smile=("f.smile" if db.has_col(cur, "face", "smile")
                         else "NULL::real AS smile")), args)
         got = [dict(r) for r in cur.fetchall()]
         clips = []
-        if use_clips and _has_clips(cur, s):
+        if use_clips and db.has_table(cur, "vclip"):
             cur.execute(_FETCH_CLIP.format(
                 vclip=s.table("vclip"), asset=s.table("asset"),
                 face=s.table("face"),
-                clip_smile=("c.smile" if _has_col(cur, s, "vclip", "smile")
+                clip_smile=("c.smile" if db.has_col(cur, "vclip", "smile")
                             else "NULL::real AS smile")), args)
             clips = [dict(r) for r in cur.fetchall()]
         c.rollback()
@@ -271,45 +271,13 @@ def fetch(subjects, date_from=None, date_to=None, together=False,
     return out
 
 
-_clip_tbl = {"at": 0.0, "ok": False}
-
-
-def _has_clips(cur, s):
-    """Bang fp_vclip chi ton tai sau khi indexer chay ban co video. Cache 60s."""
-    import time
-    if time.time() - _clip_tbl["at"] < 60.0:
-        return _clip_tbl["ok"]
-    cur.execute(
-        "SELECT 1 FROM information_schema.tables "
-        "WHERE table_schema=%s AND table_name=%s",
-        (s.pg_schema, f"{s.prefix}vclip"))
-    _clip_tbl.update(at=time.time(), ok=cur.fetchone() is not None)
-    return _clip_tbl["ok"]
-
-
-_cols = {}
-
-
-def _has_col(cur, s, table, col):
-    """Cot `col` co ton tai trong bang cua job chua? Cache 60s.
-
-    Service nay va indexer la HAI container deploy rieng, nen luon co giai doan
-    lech phien ban. Deploy timeline moi truoc khi indexer chay migration thi
-    'f.smile' lam ca man hinh chon anh tra ve 500. Do mot lan roi thay bang
-    NULL::real thi chi mat mot chi so, khong sap.
-    """
-    import time
-    key = (table, col)
-    hit = _cols.get(key)
-    if hit and time.time() - hit[0] < 60.0:
-        return hit[1]
-    cur.execute(
-        "SELECT 1 FROM information_schema.columns "
-        "WHERE table_schema=%s AND table_name=%s AND column_name=%s",
-        (s.pg_schema, f"{s.prefix}{table}", col))
-    ok = cur.fetchone() is not None
-    _cols[key] = (time.time(), ok)
-    return ok
+# Cac phep do lech phien ban (bang / cot da ton tai chua) nam trong db.py: chung
+# duoc dung o ca hai cho, va hai ban sao cua cung mot phep do se lech nhau.
+#
+# Vi sao can do: service nay va indexer la HAI container deploy rieng, nen luon
+# co giai doan lech phien ban. Deploy timeline moi truoc khi indexer chay
+# migration thi 'f.smile' lam ca man hinh chon anh tra ve 500. Do mot lan roi
+# thay bang NULL::real thi chi mat mot chi so, khong sap.
 
 
 def _one_per_asset(rows_, n_groups, together):

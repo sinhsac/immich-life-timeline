@@ -10,6 +10,7 @@ ba bang rieng cua no:
 Khong bao gio ghi vao bang cua Immich, cung khong sua fp_asset / fp_face.
 """
 import contextlib
+import time
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -171,37 +172,91 @@ def indexer_ready():
     return True, f"{n_face} faces ready, {n_kps} with landmarks"
 
 
-_PROGRESS = """
-SELECT COUNT(*)                                  AS n_asset,
+# ------------------------------------------------------------- lech phien ban
+# Service nay va indexer la HAI container deploy RIENG NHAU, nen luon co giai
+# doan lech phien ban: timeline moi doc mot cot ma migration cua indexer chua
+# tao ra thi ca man hinh tra ve 500. Do truoc mot lan roi thay bang 0 thi chi
+# mat mot chi so, khong sap. Cung ly le voi select._has_col, va dat o day de
+# hai cho khong con hai ban sao roi lech nhau.
+_meta = {}
+
+
+def _probe(cur, key, sql, args, ttl=60.0):
+    hit = _meta.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    cur.execute(sql, args)
+    ok = cur.fetchone() is not None
+    _meta[key] = (time.time(), ok)
+    return ok
+
+
+def has_col(cur, table, col):
+    """Bang fp_<table> da co cot `col` chua? Cache 60s."""
+    s = get()
+    return _probe(
+        cur, ("col", table, col),
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+        (s.pg_schema, f"{s.prefix}{table}", col))
+
+
+def has_table(cur, table):
+    """Bang fp_<table> da ton tai chua? Cache 60s."""
+    s = get()
+    return _probe(
+        cur, ("tbl", table),
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema=%s AND table_name=%s",
+        (s.pg_schema, f"{s.prefix}{table}"))
+
+
+# Ba manh roi vi cac cot video / smile chi xuat hien sau migration cua indexer.
+_P_CORE = """
+       COUNT(*)                                  AS n_asset,
        COUNT(*) FILTER (WHERE face_state = 0)    AS face_wait,
        COUNT(*) FILTER (WHERE face_state = 2)    AS face_todo,
        COUNT(*) FILTER (WHERE face_state = 1)    AS face_done,
        COUNT(*) FILTER (WHERE face_state = -1)   AS face_err,
        COUNT(*) FILTER (WHERE body_state = 0)    AS body_todo,
        COUNT(*) FILTER (WHERE body_state = 1)    AS body_done,
-       COUNT(*) FILTER (WHERE body_state = -1)   AS body_err
-FROM {asset}
-"""
+       COUNT(*) FILTER (WHERE body_state = -1)   AS body_err"""
+
+# Stage 'clips' — stage DAT NHAT cua ca job, va truoc day la stage duy nhat
+# khong hien gi tren UI du du lieu da nam san trong fp_asset.
+_P_CLIP = """,
+       COUNT(*) FILTER (WHERE kind = 'video')                      AS n_video,
+       COUNT(*) FILTER (WHERE kind = 'video' AND clip_state = 0)   AS clip_todo,
+       COUNT(*) FILTER (WHERE kind = 'video' AND clip_state = 1)   AS clip_done,
+       COUNT(*) FILTER (WHERE kind = 'video' AND clip_state = -1)  AS clip_err"""
+
+_P_VCOUNT = """,
+       COALESCE(SUM(n_vframe), 0)                                  AS n_vframe,
+       COALESCE(SUM(n_vface), 0)                                   AS n_vface,
+       COALESCE(SUM(n_vbody), 0)                                   AS n_vbody,
+       COALESCE(SUM(n_clip), 0)                                    AS n_clip"""
 
 
 def progress():
     """Tien do job indexer, du de ve thanh progress tren UI.
 
     Vong doi mot anh: face_state 0 -> 2 (stage faces) -> 1 (stage landmarks),
-    va body_state 0 -> 1 (stage bodies). -1 la loi doc anh, tinh la da xu ly
-    vi job khong tu thu lai (can --reset errors).
+    va body_state 0 -> 1 (stage bodies). Video co them clip_state 0 -> 1.
+    -1 la loi doc, tinh la DA XU LY vi job khong tu thu lai (can --reset).
     """
     s = get()
     with rows() as (c, cur):
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema=%s AND table_name=%s",
-            (s.pg_schema, f"{s.prefix}asset"))
-        if cur.fetchone() is None:
+        if not has_table(cur, "asset"):
             c.rollback()
             return {"ready": False, "detail": "no fp_asset table yet"}
 
-        cur.execute(_PROGRESS.format(asset=s.table("asset")))
+        has_clip = has_col(cur, "asset", "clip_state")
+        has_vcount = has_col(cur, "asset", "n_vframe")
+        has_smile = has_col(cur, "face", "smile")
+        cur.execute("SELECT" + _P_CORE
+                    + (_P_CLIP if has_clip else "")
+                    + (_P_VCOUNT if has_vcount else "")
+                    + f"\nFROM {s.table('asset')}")
         p = dict(cur.fetchone())
         cur.execute(f"SELECT COUNT(*) n FROM {s.table('face')}")
         p["n_face"] = cur.fetchone()["n"]
@@ -209,16 +264,25 @@ def progress():
         p["n_face_ready"] = cur.fetchone()["n"]
         cur.execute(f"SELECT COUNT(*) n FROM {s.table('body')}")
         p["n_body"] = cur.fetchone()["n"]
+        # Diem nu cuoi suy tu lmk68 DA LUU, nen mau so la so mat da co landmark
+        # chu khong phai so anh. Chua chay 'job.py --stage smiles' thi cot nay
+        # rong het va viec uu tien anh dang cuoi im lang khong hoat dong —
+        # do la ly do no phai hien ra thay vi an di.
+        p["n_smile"] = 0
+        if has_smile:
+            cur.execute(f"SELECT COUNT(*) n FROM {s.table('face')} "
+                        f"WHERE state=1 AND smile IS NOT NULL")
+            p["n_smile"] = cur.fetchone()["n"]
+        p["n_vclip"] = 0
+        if has_table(cur, "vclip"):
+            cur.execute(f"SELECT COUNT(*) n FROM {s.table('vclip')}")
+            p["n_vclip"] = cur.fetchone()["n"]
 
         runs = []
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema=%s AND table_name=%s",
-            (s.pg_schema, f"{s.prefix}run"))
-        if cur.fetchone() is not None:
+        if has_table(cur, "run"):
             cur.execute(
                 f"SELECT stage, started_at, finished_at, n_done, n_err, note "
-                f"FROM {s.table('run')} ORDER BY id DESC LIMIT 5")
+                f"FROM {s.table('run')} ORDER BY id DESC LIMIT 8")
             for r in cur.fetchall():
                 r = dict(r)
                 for k in ("started_at", "finished_at"):
@@ -228,7 +292,8 @@ def progress():
                 runs.append(r)
         c.rollback()
 
-    total = max(1, p["n_asset"])
+    p["has_video"] = bool(has_clip and p.get("n_video"))
+    p["has_smile"] = has_smile
     p["stages"] = [
         {"name": "faces",
          "label": "Copy faces from Immich",
@@ -243,8 +308,27 @@ def progress():
          "done": p["body_done"] + p["body_err"],
          "total": p["n_asset"]},
     ]
+    if p["has_video"]:
+        # Mau so la SO VIDEO, khong phai so asset: mot thu vien 20k anh va 500
+        # video se mai mai bao 2% neu chia cho tong so asset, va con so do vo
+        # nghia voi stage ton nhieu thoi gian nhat.
+        p["stages"].append({
+            "name": "clips",
+            "label": "Video clips (det_10g + w600k_r50)",
+            "done": p["clip_done"] + p["clip_err"],
+            "total": p["n_video"]})
+    if has_smile and p["n_face_ready"]:
+        p["stages"].append({
+            "name": "smiles",
+            "label": "Smile score (from stored landmarks)",
+            "done": p["n_smile"],
+            "total": p["n_face_ready"]})
     for st in p["stages"]:
-        st["pct"] = round(100.0 * st["done"] / total, 1)
+        # Chia cho total CUA CHINH STAGE. Truoc day chia cho n_asset cho moi
+        # stage — dung tinh co voi ba stage dau vi mau so trung nhau, nhung sai
+        # ngay khi co mot stage dem theo don vi khac (video, khuon mat).
+        st["pct"] = round(100.0 * st["done"] / max(1, st["total"]), 1)
+        st["left"] = max(0, st["total"] - st["done"])
     p["runs"] = runs
     p["running"] = next((r["stage"] for r in runs if r["running"]), None)
     p["ready"] = True

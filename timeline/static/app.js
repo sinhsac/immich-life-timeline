@@ -11,7 +11,7 @@ const S = {
   person: null, projectId: null, filters: {}, defaults: null,
   result: null, renderId: null, poll: null, postures: [], orients: [],
   statusTimer: null, prevTimer: null, sbTimer: null, sb: null, out: null,
-  picked: new Map(), people: [], sug: [], view: 1,
+  picked: new Map(), people: [], sug: [], view: 1, progress: null,
   // Each element is ONE PERSON: {name, ids:[cluster...]}. Empty = all the
   // currently selected clusters belong to the same person (the common case).
   subjects: [],
@@ -152,15 +152,37 @@ function showStats() {
     $('o_aspect').value = $('r_aspect').value;
   });
   $('r_mode').onchange = () => { syncRenderMode(); storyboardSoon(); };
+  // Only the controls that change SHOT LENGTHS need the storyboard recomputed.
+  // arc scales holds, title_seconds and outro_s are added to real holds, and
+  // beat snapping rewrites all of them. Cross-fade, chapter cards, audio and
+  // encoding never move the total, so they must not trigger a round trip.
   ['r_motion', 'r_title', 'r_chapter_card', 'r_birth_year', 'r_out_fps',
-    'r_label', 'r_smooth', 'r_audio', 'r_audio_normalize'].forEach((id) => {
+    'r_label', 'r_smooth', 'r_audio', 'r_audio_normalize',
+    'r_arc'].forEach((id) => {
     $(id).onchange = storyboardSoon;
   });
-  ['r_audio_lead', 'r_audio_tail'].forEach((id) => {
-    $(id).oninput = () => { $('o_' + id.slice(2)).textContent = $(id).value; };
+  ['r_music', 'r_beat_sync'].forEach((id) => {
+    $(id).onchange = () => { syncMusic(); storyboardSoon(); };
+  });
+  $('r_xfade_auto').onchange = syncXfade;
+  // Every range mirrors itself into <output id="o_<name>">, and the three that
+  // move the duration also queue a storyboard.
+  const SB_RANGE = new Set(['r_beat_every', 'r_title_seconds', 'r_outro_s']);
+  ['r_audio_lead', 'r_audio_tail', 'r_audio_fade_in', 'r_audio_fade_out',
+    'r_audio_gain', 'r_music_gain', 'r_music_duck', 'r_music_fade_in',
+    'r_music_fade_out', 'r_beat_every', 'r_title_seconds', 'r_card_seconds',
+    'r_intro_s', 'r_outro_s', 'r_xfade', 'r_anchor_x', 'r_pair_frac',
+    'r_crf'].forEach((id) => {
+    $(id).oninput = () => {
+      $('o_' + id.slice(2)).textContent = $(id).value;
+      if (SB_RANGE.has(id)) storyboardSoon();
+    };
     $(id).oninput();
   });
   syncRenderMode();
+  syncMusic();
+  syncXfade();
+  $('f_soft_pose').onchange = syncSoftPose;
   $('apply').onclick = applyFilters;
   $('resetF').onclick = () => { setFilterUI(S.defaults.filters); applyFilters(); };
   $('render').onclick = startRender;
@@ -229,6 +251,8 @@ function showHealth(h) {
 // reads status from the state columns in fp_asset. Polling switches itself off
 // once everything is done.
 function showProgress(p) {
+  S.progress = p;
+  showDataNotes();
   // Label on the nav: just one number, so the user can tell whether the
   // statistics page is worth opening, without it taking room from the other
   // steps.
@@ -251,19 +275,32 @@ function showProgress(p) {
     return;
   }
 
-  $('idxCards').innerHTML = [
-    ['n_asset', 'photos in the library'],
+  const cards = [
+    ['n_asset', 'assets in the library'],
     ['n_face', 'faces'],
     ['n_face_ready', 'faces with landmarks'],
     ['n_body', 'bodies'],
-  ].map(([k, lab]) => `<div class="card"><b>${num(p[k])}</b><span>${lab}</span></div>`)
+  ];
+  // The clips stage is the most expensive one in the whole job and used to be
+  // the only one showing nothing at all here, even though every figure was
+  // already sitting in fp_asset.
+  if (p.has_video) {
+    cards.push(['n_video', 'videos'],
+      ['n_vframe', 'video frames scanned'],
+      ['n_vface', 'faces found in video'],
+      ['n_vclip', 'clips cut']);
+  }
+  const errs = (p.face_err || 0) + (p.body_err || 0);
+  $('idxCards').innerHTML = cards
+    .map(([k, lab]) => `<div class="card"><b>${num(p[k])}</b><span>${lab}</span></div>`)
     .join('')
-    + (((p.face_err || 0) + (p.body_err || 0))
-      ? `<div class="card"><b class="bad">${num((p.face_err || 0) + (p.body_err || 0))}</b>`
-        + '<span>photos that failed to read</span></div>' : '');
+    + (errs ? `<div class="card"><b class="bad">${num(errs)}</b>`
+      + '<span>photos that failed to read</span></div>' : '')
+    + (p.clip_err ? `<div class="card"><b class="bad">${num(p.clip_err)}</b>`
+      + '<span>videos that failed to scan</span></div>' : '');
 
   $('idxBars').innerHTML = p.stages.map((s) => {
-    const left = Math.max(0, s.total - s.done);
+    const left = s.left != null ? s.left : Math.max(0, s.total - s.done);
     return `<div class="prow${p.running === s.name ? ' run' : ''}">`
       + `<span class="plab">${s.label}`
       + (p.running === s.name ? ' <b>running</b>' : '') + '</span>'
@@ -271,6 +308,12 @@ function showProgress(p) {
       + `<span class="pnum">${s.pct}%<em>${num(s.done)}/${num(s.total)}`
       + (left ? ` · ${num(left)} left` : '') + '</em></span></div>';
   }).join('')
+    + (p.clip_err ? `<div class="warn">${num(p.clip_err)} videos could not be `
+      + 'scanned. The usual causes are a file over <code>VIDEO_MAX_MB</code> in '
+      + 'HTTP mode, or an original in HEVC/AV1 that OpenCV cannot open — '
+      + 'enabling transcoding in Immich fixes the second. They are not retried '
+      + 'automatically; run <code>job.py --reset clips</code> after '
+      + 'changing anything.</div>' : '')
     + (p.running
       ? ''
       : '<p class="muted">No stage is running. The next job picks up exactly '
@@ -294,6 +337,40 @@ function showProgress(p) {
   $('statsAt').textContent = 'updated ' + new Date().toLocaleTimeString('en-US');
 }
 
+// Two features can be switched on here while the data behind them does not
+// exist, and both then do nothing without saying so: smile scores live in a
+// column the 'smiles' stage fills, and clips come from a stage that may never
+// have run. Silent is the worst outcome, so say it next to the switch.
+function showDataNotes() {
+  const p = S.progress;
+  const sn = $('smileNote');
+  const cn = $('clipNote');
+  if (!sn || !cn) return;
+  if (!p || !p.ready) { sn.innerHTML = ''; cn.innerHTML = ''; return; }
+
+  sn.innerHTML = (p.has_smile && p.n_smile)
+    ? (p.n_smile < p.n_face_ready
+      ? `<div class="warn">Only ${num(p.n_smile)} of ${num(p.n_face_ready)} `
+        + 'faces carry a smile score. Run <code>job.py --stage smiles</code> to '
+        + 'fill the rest — it reads the landmarks already stored, so not one '
+        + 'photo is re-read.</div>'
+      : '')
+    : '<div class="warn">No face has a smile score yet, so this preference '
+      + 'currently does nothing. Run <code>job.py --stage smiles</code>: it '
+      + 'derives the score from the <code>lmk68</code> blobs already in the '
+      + 'database, without re-reading a photo or loading a model.</div>';
+
+  cn.innerHTML = !p.has_video
+    ? '<div class="warn">No video in the library, so there is nothing to splice '
+      + 'in.</div>'
+    : (p.n_vclip ? ''
+      : `<div class="warn">${num(p.n_video)} videos are indexed but not one clip `
+        + 'has been cut. Run <code>job.py --stage clips</code>; if it has already '
+        + 'run, check that at least one person has an embedding to match '
+        + 'against, otherwise every face is stored with no identity and no clip '
+        + 'can be selected.</div>');
+}
+
 const progressDone = (p) => p.ready && p.stages.every((s) => s.done >= s.total);
 
 async function pollStatus() {
@@ -303,6 +380,10 @@ async function pollStatus() {
     showHealth(h);
     showProgress(p);
     if (progressDone(p)) return;            // all done, so stop polling for good
+    // Nothing running, but something incomplete. A stage that will never run on
+    // its own — clips with DO_VIDEO=0, or smiles — would otherwise hold the 20s
+    // cycle open forever without ever producing a new number.
+    if (!p.running) wait = 60000;
   } catch (e) {
     wait = 60000;                           // on error back off, do not hammer it
   }
@@ -682,8 +763,17 @@ function drawChart(tl) {
 // ================================================================ step 3
 const RANGE_KEYS = ['max_yaw', 'max_pitch', 'max_roll', 'min_frontality',
   'min_ear', 'min_eye_ratio', 'min_sharp', 'bucket_days', 'per_bucket',
-  'target_seconds', 'max_per_chapter', 'max_clip_motion'];
+  'target_seconds', 'max_per_chapter', 'max_clip_motion',
+  // Hard walls. The sliders above them are only knees once soft_pose is on, so
+  // leaving these out of the UI made those sliders read as something they are
+  // not.
+  'hard_yaw', 'hard_pitch', 'hard_roll', 'hard_frontality', 'hard_sharp',
+  'min_smile', 'dedup_seconds', 'min_clip_seconds'];
 const SELECT_KEYS = ['mode', 'pace', 'chapter_by'];
+// Plain on/off filters. Listed once so setFilterUI and readFilterUI cannot
+// drift apart — the old code spelled every one of them out twice.
+const BOOL_KEYS = ['soft_pose', 'prefer_smile', 'use_clips', 'allow_others',
+  'use_body', 'allow_missing_body'];
 
 // mode='story' and mode='even' use two different sets of parameters. Showing
 // both at once means the user drags a slider that has no effect at all, with no
@@ -723,19 +813,34 @@ function setFilterUI(f) {
   $('o_target_seconds').textContent = $('f_target_seconds').value;
   syncAutoLen();
   syncMode();
-  $('f_use_clips').checked = !!f.use_clips;
-  $('f_allow_others').checked = !!f.allow_others;
+  BOOL_KEYS.forEach((k) => { const i = $('f_' + k); if (i) i.checked = !!f[k]; });
   $('f_max_faces').value = f.max_faces ?? 0;
-  $('f_use_body').checked = !!f.use_body;
-  $('f_allow_missing_body').checked = !!f.allow_missing_body;
   $('bodyOpts').classList.toggle('hide', !f.use_body);
+  syncSoftPose();
+  showDataNotes();
   chips('c_postures', S.postures, f.postures || []);
   chips('c_orientations', S.orients, f.orientations || []);
 }
 
+// The knee sliders only mean "start losing points here" while scoring is on.
+// With it off they go back to being walls and the hard limits stop applying, so
+// say which of the two you are looking at rather than leaving both on screen
+// meaning different things on different days.
+function syncSoftPose() {
+  const soft = $('f_soft_pose').checked;
+  $('softNote').innerHTML = soft
+    ? 'The four sliders below are <b>knees</b>: cross one and the photo starts '
+      + 'losing points on a ramp up to the hard limit. Only the hard limits '
+      + 'reject.'
+    : '<b>Off:</b> the four sliders below reject outright, and the hard limits '
+      + 'are ignored. This is the old behaviour.';
+}
+
 function fmt(k, v) {
   if (k === 'min_eye_ratio') return (Number(v) * 100).toFixed(1) + '%';
-  if (k === 'min_frontality' || k === 'min_ear') return Number(v).toFixed(2);
+  if (k === 'min_frontality' || k === 'min_ear' || k === 'hard_frontality'
+      || k === 'min_smile') return Number(v).toFixed(2);
+  if (k === 'dedup_seconds') return Number(v) ? String(v) : 'off';
   return String(v);
 }
 
@@ -805,11 +910,8 @@ function readFilterUI() {
   });
   f.target_seconds = $('f_auto_len').checked
     ? null : Number($('f_target_seconds').value);
-  f.use_clips = $('f_use_clips').checked;
-  f.allow_others = $('f_allow_others').checked;
+  BOOL_KEYS.forEach((k) => { const i = $('f_' + k); if (i) f[k] = i.checked; });
   f.max_faces = Number($('f_max_faces').value || 0);
-  f.use_body = $('f_use_body').checked;
-  f.allow_missing_body = $('f_allow_missing_body').checked;
   f.postures = readChips('c_postures');
   f.orientations = readChips('c_orientations');
   return f;
@@ -825,6 +927,11 @@ async function applyFilters() {
     });
     S.result = r;
     S.filters = r.filters;
+    // Show what the server ACTUALLY used, not what was sent. merge() rewrites
+    // values: every hard limit is pushed to the far side of its own knee, and
+    // the pacing figures go through story.plan(). Without this the hard-limit
+    // sliders sit at a number the filtering never saw.
+    setFilterUI(r.filters);
     renderResult();
     showStep2(r);
     $('applying').textContent = '';
@@ -966,13 +1073,89 @@ function renderOpts() {
     title: $('r_title').checked,
     chapter_card: $('r_chapter_card').checked,
     birth_year: (by >= 1900 && by <= 2100) ? by : null,
+    // Framing that /api/aligned cannot preview, so it is deliberately not part
+    // of framingOpts(): the preview would silently ignore it and then lie.
+    anchor_x: Number($('r_anchor_x').value),
+    pair_frac: Number($('r_pair_frac').value),
+    crf: Number($('r_crf').value),
+    arc: $('r_arc').checked,
+    title_seconds: Number($('r_title_seconds').value),
+    card_seconds: Number($('r_card_seconds').value),
+    intro_s: Number($('r_intro_s').value),
+    outro_s: Number($('r_outro_s').value),
+    // null, not 0: 0 is a real request for hard cuts, while "unset" means take
+    // the length from the pacing. Sending 0 for both makes the two
+    // indistinguishable.
+    xfade: $('r_xfade_auto').checked ? null : Number($('r_xfade').value),
     audio: $('r_audio').checked,
     audio_lead: Number($('r_audio_lead').value),
     audio_tail: Number($('r_audio_tail').value),
+    audio_fade_in: Number($('r_audio_fade_in').value),
+    audio_fade_out: Number($('r_audio_fade_out').value),
+    audio_gain: Number($('r_audio_gain').value),
     audio_normalize: $('r_audio_normalize').checked,
+    music: $('r_music').value || null,
+    music_gain: Number($('r_music_gain').value),
+    music_duck: Number($('r_music_duck').value),
+    music_fade_in: Number($('r_music_fade_in').value),
+    music_fade_out: Number($('r_music_fade_out').value),
+    music_loop: $('r_music_loop').checked,
+    beat_sync: $('r_beat_sync').checked,
+    beat_every: Number($('r_beat_every').value),
     fps: Number($('r_fps').value),
     smooth: $('r_smooth').value,
   });
+}
+
+// Beat sync has nothing to snap to without a track, and the server enforces
+// that too (beat_sync AND music is not None). Grey it out rather than let
+// someone tick a box that quietly does nothing.
+function syncMusic() {
+  const has = !!$('r_music').value;
+  $('r_beat_sync').disabled = !has;
+  if (!has) $('r_beat_sync').checked = false;
+  $('r_beat_sync').parentElement.classList.toggle('off', !has);
+  $('r_beat_every').parentElement.classList
+    .toggle('off', !$('r_beat_sync').checked);
+}
+
+// null and 0 are different requests: 0 is "hard cuts", unset is "take the length
+// from the pacing". A slider cannot express both, so the checkbox carries the
+// distinction and the slider is greyed out while it is inferred.
+function syncXfade() {
+  $('xfWrap').classList.toggle('off', $('r_xfade_auto').checked);
+}
+
+// MUSIC_DIR is read-only by design, so the list is whatever is on disk. Reload
+// it on entering step 4 rather than only at startup: dropping a file into the
+// directory should not need a browser refresh.
+async function loadMusic() {
+  let d = null;
+  try {
+    d = await api('/music');
+  } catch (e) {
+    d = null;
+  }
+  const sel = $('r_music');
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">None — silence between the clips</option>';
+  (d && d.music ? d.music : []).forEach((m) => {
+    const o = document.createElement('option');
+    o.value = m.name;
+    o.textContent = `${m.label} (${(m.size / 1048576).toFixed(1)} MB)`;
+    sel.appendChild(o);
+  });
+  if (keep) sel.value = keep;
+  const n = (d && d.music) ? d.music.length : 0;
+  $('musicNote').innerHTML = !d
+    ? '<div class="warn">Could not read the track list.</div>'
+    : (!d.configured
+      ? '<div class="warn"><code>MUSIC_DIR</code> is not set, so there is no '
+        + 'music to choose from. Point it at a directory of tracks mounted '
+        + 'read-only and restart the service.</div>'
+      : (n ? '' : '<div class="warn"><code>MUSIC_DIR</code> is set but empty. '
+        + 'Copy a few tracks into it — no upload from here, on purpose.</div>'));
+  syncMusic();
 }
 
 function syncRenderMode() {
@@ -992,7 +1175,10 @@ function enterStep4() {
   syncRenderMode();
   loadRenders();
   renderPreview();
-  loadStoryboard();
+  // Await the track list before the storyboard: with beat sync already on, the
+  // storyboard has to be computed against the grid of the selected track, and
+  // firing both at once races.
+  loadMusic().then(loadStoryboard);
 }
 
 // The storyboard is computed on the server with exactly the render step's own
@@ -1032,6 +1218,7 @@ async function loadStoryboard() {
             + 'duration.</div>' : '')
         + (d.n_missing ? `<div class="warn">${d.n_missing} photos had no readable `
           + 'preview file and were dropped from the story.</div>' : '')
+        + beatLine(d)
         + '<div class="chapbars">'
         + d.chapters.map((c) => '<div class="cb">'
           + `<span class="cbl">${c.label}</span>`
@@ -1043,6 +1230,34 @@ async function loadStoryboard() {
   } catch (e) {
     $('sbInfo').innerHTML = `<div class="err">${e.message}</div>`;
   }
+}
+
+// The server silently drops a track name it cannot resolve and renders silent —
+// a deliberate choice, because one bad name should not fail a whole render. But
+// silent on the server has to be loud here, or the user picks a track, gets no
+// music, and has nothing to go on. Same for a track with no detectable pulse:
+// that is a normal result, not an error, and it has to be said out loud.
+function beatLine(d) {
+  const want = $('r_music').value;
+  const out = [];
+  if (want && !d.music) {
+    out.push('<div class="warn">The server could not resolve '
+      + `<code>${want}</code> inside <code>MUSIC_DIR</code>, so this render `
+      + 'will have no music — only the audio of the video clips.</div>');
+  }
+  if (!d.beat_sync) return out.join('');
+  const b = d.beat;
+  if (b && b.found) {
+    out.push('<p class="muted">Cutting on the beat: <b>' + b.bpm + ' BPM</b>, '
+      + `${d.n_beat_snap} of ${d.n_shots} shots snapped to the grid`
+      + (d.beat_every > 1 ? `, every ${d.beat_every} beats` : '')
+      + '. The duration above already accounts for the snapping.</p>');
+  } else if (b) {
+    out.push('<div class="warn">No clear pulse was found in this track, so the '
+      + 'normal storytelling pacing is used. For free piano, rain or spoken '
+      + 'word that is the expected result rather than a failure.</div>');
+  }
+  return out.join('');
 }
 
 function estimate() {

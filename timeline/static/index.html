@@ -176,6 +176,9 @@
       </div>
 
       <h3>Head pose</h3>
+      <label class="chk"><input type="checkbox" id="f_soft_pose" checked>
+        Score the pose instead of rejecting on it</label>
+      <p class="muted" id="softNote"></p>
       <label>Max head turn <output id="o_max_yaw"></output>°
         <input type="range" id="f_max_yaw" min="5" max="60" step="1"></label>
       <label>Max tilt up/down <output id="o_max_pitch"></output>°
@@ -186,12 +189,62 @@
         <input type="range" id="f_min_frontality" min="0" max="1" step="0.05"></label>
       <label>Eye-openness threshold (EAR) <output id="o_min_ear"></output>
         <input type="range" id="f_min_ear" min="0" max="0.35" step="0.01"></label>
+      <p class="muted">EAR stays a hard gate either way — a photo with the eyes
+        shut cannot be rescued by any amount of sharpness.</p>
+
+      <details class="sub">
+        <summary>Hard limits — where a photo is rejected outright</summary>
+        <p class="muted">With scoring on, the sliders above are only
+          <b>knees</b>. These are the walls. The default used to cut at 22° of
+          head turn, and 22° is still very nearly looking straight at the lens:
+          photos of someone grinning back over their shoulder, mid-run, blowing
+          out candles were thrown away before they were ever scored, and what
+          survived was passport shots.</p>
+        <label>Reject past <output id="o_hard_yaw"></output>° of head turn
+          <input type="range" id="f_hard_yaw" min="10" max="90" step="1"></label>
+        <label>Reject past <output id="o_hard_pitch"></output>° of tilt up/down
+          <input type="range" id="f_hard_pitch" min="10" max="80" step="1"></label>
+        <label>Reject past <output id="o_hard_roll"></output>° of sideways tilt
+          <input type="range" id="f_hard_roll" min="10" max="90" step="1"></label>
+        <label>Reject below frontality <output id="o_hard_frontality"></output>
+          <input type="range" id="f_hard_frontality" min="0" max="1"
+                 step="0.05"></label>
+        <label>Reject below sharpness <output id="o_hard_sharp"></output>
+          <input type="range" id="f_hard_sharp" min="0" max="200" step="2"></label>
+        <p class="muted">The server keeps every wall on the far side of its own
+          knee, so an inconsistent pair is corrected rather than inverting the
+          score.</p>
+      </details>
 
       <h3>Image quality</h3>
       <label>Min face size <output id="o_min_eye_ratio"></output> of the long edge
         <input type="range" id="f_min_eye_ratio" min="0" max="0.15" step="0.005"></label>
       <label>Min sharpness <output id="o_min_sharp"></output>
         <input type="range" id="f_min_sharp" min="0" max="400" step="10"></label>
+
+      <h3>Smiling</h3>
+      <label class="chk"><input type="checkbox" id="f_prefer_smile" checked>
+        Give smiling photos a higher score</label>
+      <p class="muted">Everything else here measures a <b>technically clean
+        face</b>; nothing measured whether the moment was worth keeping. A smile
+        is the closest this metric set gets to "a moment", and it is the largest
+        single bonus in the score — a photo turned 35° with a broad smile now
+        outscores a dead-straight, unsmiling one.</p>
+      <div id="smileNote"></div>
+      <label>Reject below smile <output id="o_min_smile"></output>
+        <input type="range" id="f_min_smile" min="0" max="0.9" step="0.05"></label>
+      <p class="muted">Leave at 0. A solemn portrait is part of the story too, so
+        this is off by default and the preference is applied by adding points
+        rather than by rejecting.</p>
+
+      <h3>Duplicate shots</h3>
+      <label>Photos within <output id="o_dedup_seconds"></output> s are one moment
+        <input type="range" id="f_dedup_seconds" min="0" max="60" step="1"></label>
+      <p class="muted">Bursts collapse to their best frame. 0 turns it off. A
+        burst is capped at three times this figure, so a whole afternoon of
+        photos taken 5 s apart does not shrink to a single frame. Video clips are
+        never collapsed — they all share the video's timestamp, and the indexer
+        already guaranteed they do not overlap.</p>
 
       <h3>Video clips</h3>
       <label class="chk"><input type="checkbox" id="f_use_clips" checked>
@@ -202,8 +255,14 @@
         only marginally better.</p>
       <label>Max shake <output id="o_max_clip_motion"></output>
         <input type="range" id="f_max_clip_motion" min="0.5" max="8" step="0.1"></label>
-      <p class="muted">Measured in "face widths per second". High accepts shaky
-        handheld footage, low keeps only genuinely steady clips.</p>
+      <p class="muted">Measured in "face widths per second" — divided by face
+        size, not frame size, because a large face moving 50 px is normal while a
+        small face moving 50 px is a jump cut. High accepts shaky handheld
+        footage, low keeps only genuinely steady clips.</p>
+      <label>Drop clips shorter than <output id="o_min_clip_seconds"></output> s
+        <input type="range" id="f_min_clip_seconds" min="0" max="4"
+               step="0.1"></label>
+      <div id="clipNote"></div>
 
       <h3>Other people in the photo</h3>
       <label class="chk"><input type="checkbox" id="f_allow_others">
@@ -295,6 +354,29 @@
       <label class="chk"><input type="checkbox" id="r_level" checked>
         Rotate so the eyes are level</label>
 
+      <details class="sub">
+        <summary>Advanced framing</summary>
+        <label>Horizontal eye position <output id="o_anchor_x"></output>
+          <input type="range" id="r_anchor_x" min="0.2" max="0.8" step="0.01"
+                 value="0.5"></label>
+        <label>Two people: distance between them
+          <output id="o_pair_frac"></output> of the frame width
+          <input type="range" id="r_pair_frac" min="0.08" max="0.8" step="0.01"
+                 value="0.30"></label>
+        <p class="muted">Only used on photos holding two of the selected people.
+          The two eye centres are <b>not</b> treated as one pair of eyes — a tall
+          parent and a short child are 30° apart and levelling that wrecks the
+          photo. Instead two virtual points are placed on a horizontal line the
+          real distance apart, so the further apart they stand the wider the
+          framing opens. Photos with only one of them still anchor normally on
+          that one face.</p>
+        <label>Encoding quality (CRF) <output id="o_crf"></output>
+          <input type="range" id="r_crf" min="14" max="32" step="1"
+                 value="20"></label>
+        <p class="muted">Lower is better looking and larger. 20 is visually
+          clean for this material.</p>
+      </details>
+
       <h3>Editing style</h3>
       <label>Style
         <select id="r_mode">
@@ -343,6 +425,102 @@
                  value="0.8"></label>
         <label class="chk"><input type="checkbox" id="r_audio_normalize" checked>
           Even out levels across clips</label>
+        <details class="sub">
+          <summary>Fades and level</summary>
+          <label>Fade in <output id="o_audio_fade_in"></output> s
+            <input type="range" id="r_audio_fade_in" min="0.02" max="2"
+                   step="0.01" value="0.35"></label>
+          <label>Fade out <output id="o_audio_fade_out"></output> s
+            <input type="range" id="r_audio_fade_out" min="0.02" max="3"
+                   step="0.01" value="0.6"></label>
+          <label>Gain <output id="o_audio_gain"></output> dB
+            <input type="range" id="r_audio_gain" min="-24" max="12" step="1"
+                   value="0"></label>
+          <p class="muted">A fade is never longer than half its own clip, so
+            these are ceilings rather than exact figures.</p>
+        </details>
+
+        <h3>Background music</h3>
+        <div id="musicNote"></div>
+        <label>Track
+          <select id="r_music">
+            <option value="">None — silence between the clips</option>
+          </select></label>
+        <p class="muted">Photos are silent, video clips are not. Two clips
+          separated by four photos means five seconds of silence and then sound
+          slamming back in. The audio lead and tail soften the two edges; they
+          cannot fill the hole in between. Music is what holds a continuous bed
+          of sound under the whole thing — <b>a structural fix, not
+          decoration</b>.</p>
+        <p class="muted">Tracks are read from the <code>MUSIC_DIR</code>
+          directory on the server, mounted read-only. There is deliberately no
+          upload: the name ends up on an ffmpeg command line, so every check
+          lives in one place and nothing writes into that directory.</p>
+        <label>Music level <output id="o_music_gain"></output> dB
+          <input type="range" id="r_music_gain" min="-40" max="0" step="1"
+                 value="-14"></label>
+        <label>Duck by <output id="o_music_duck"></output> dB while clip audio plays
+          <input type="range" id="r_music_duck" min="-40" max="0" step="1"
+                 value="-11"></label>
+        <p class="muted">Ducking is computed, not compressed: the exact seconds
+          where real audio plays are already known before ffmpeg is called, so
+          the envelope is exact and identical between runs.</p>
+        <label>Music fades in over <output id="o_music_fade_in"></output> s
+          <input type="range" id="r_music_fade_in" min="0" max="8" step="0.1"
+                 value="1.2"></label>
+        <label>Music fades out over <output id="o_music_fade_out"></output> s
+          <input type="range" id="r_music_fade_out" min="0" max="10" step="0.1"
+                 value="2.5"></label>
+        <label class="chk"><input type="checkbox" id="r_music_loop" checked>
+          Loop the track if it is shorter than the video</label>
+
+        <label class="chk"><input type="checkbox" id="r_beat_sync">
+          Cut on the beat</label>
+        <p class="muted">This does not replace the hero/chapter structure, it
+          changes the <b>unit</b>: each shot keeps its natural length as the
+          target and the real boundary is pulled to the nearest beat. Expect the
+          duration to drift a little from the estimate — that is inherent to
+          snapping. Video clips are only ever snapped <b>down</b>, never up,
+          because snapping up would freeze the last frame mid-motion.</p>
+        <label>Cut every <output id="o_beat_every"></output> beat(s)
+          <input type="range" id="r_beat_every" min="1" max="8" step="1"
+                 value="1"></label>
+        <p class="muted">At 140 BPM a single beat is 0.43 s, too fast for a
+          memory video — try 2. Beat detection can also report half the real
+          tempo, which this compensates for.</p>
+
+        <details class="sub">
+          <summary>Advanced timing</summary>
+          <label class="chk"><input type="checkbox" id="r_arc" checked>
+            Run the first and last chapters 12% slower</label>
+          <p class="muted">A story needs room to be entered and room to be let
+            go of.</p>
+          <label>Title card held <output id="o_title_seconds"></output> s
+            <input type="range" id="r_title_seconds" min="0" max="8" step="0.1"
+                   value="2.4"></label>
+          <p class="muted">The title sits <b>on top of</b> the first photo, not
+            on its own black screen. If the first shot is a video clip it is not
+            extended for the card either — that would show a frozen frame before
+            the clip starts moving.</p>
+          <label>Chapter label held <output id="o_card_seconds"></output> s
+            <input type="range" id="r_card_seconds" min="0.4" max="6" step="0.1"
+                   value="1.8"></label>
+          <label>Fade in from black <output id="o_intro_s"></output> s
+            <input type="range" id="r_intro_s" min="0" max="4" step="0.1"
+                   value="0.8"></label>
+          <label>Hold, then fade to black <output id="o_outro_s"></output> s
+            <input type="range" id="r_outro_s" min="0" max="6" step="0.1"
+                   value="1.6"></label>
+          <label class="chk"><input type="checkbox" id="r_xfade_auto" checked>
+            Cross-fade length follows the pacing</label>
+          <label id="xfWrap" class="off">Cross-fade
+            <output id="o_xfade"></output> s
+            <input type="range" id="r_xfade" min="0" max="2" step="0.01"
+                   value="0.5"></label>
+          <p class="muted">0 means hard cuts, which is a real choice and not the
+            same thing as leaving it unset. A cross-fade never lengthens the
+            video: it overlaps the tail of the shot before it.</p>
+        </details>
       </div>
 
       <div id="flipRender" class="hide">

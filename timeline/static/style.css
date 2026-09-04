@@ -391,6 +391,26 @@ body.expert .bar button.adv{display:inline-block !important}
    you know it exists. */
 label.off{opacity:.45;pointer-events:none}
 
+/* ----------------------------------------------------------- sub-panels ---
+   A second tier inside the expert sidebar, for the knobs that matter but must
+   not be the first thing you see: hard rejection limits, audio fades, advanced
+   timing. <details> rather than a JS toggle, so keyboard and screen readers get
+   the open/closed state for free and the closed state costs no script. */
+details.sub{margin:12px 0 16px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--sunken);padding:0 12px}
+details.sub>summary{cursor:pointer;padding:9px 2px;font-size:12px;
+  font-weight:600;color:var(--fg-soft);list-style:none}
+details.sub>summary::-webkit-details-marker{display:none}
+details.sub>summary::before{content:"▸";display:inline-block;width:14px;
+  color:var(--muted)}
+details.sub[open]>summary::before{content:"▾"}
+details.sub>summary:hover{color:var(--acc)}
+details.sub[open]{padding-bottom:8px}
+details.sub[open]>summary{border-bottom:1px solid var(--line);
+  margin-bottom:4px}
+details.sub label{margin:11px 0}
+details.sub p.muted{margin:5px 0 11px}
+
 /* ---------------------------------------------------------- result page */
 #outHead{margin-bottom:4px}
 #outHead h3{margin:0 0 3px;font-size:19px;font-weight:680;text-transform:none;
