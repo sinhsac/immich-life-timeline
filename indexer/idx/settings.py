@@ -65,6 +65,16 @@ class Settings:
     onnx_threads: int = field(default_factory=lambda: _i("ONNX_THREADS", 2))
     batch: int = field(default_factory=lambda: _i("BATCH_COMMIT", 200))
     sleep_ms: int = field(default_factory=lambda: _i("SLEEP_MS", 0))
+    # Tu dat tran thoi gian chay, PHUT. 0 = khong gioi han.
+    #
+    # Dat thap hon activeDeadlineSeconds cua Job mot khoang an toan. Ly do day du
+    # trong idx/control.py, tom lai: k8s cat bang activeDeadlineSeconds thi Job
+    # thanh Failed, controller xoa pod va LOG BAY MAT; job tu dung thi exit 0,
+    # Job thanh Succeeded, log con lai, va khong de lai dong fp_run bo lung.
+    #
+    # Job resumable nen dung giua duong khong mat gi: stage clips commit theo tung
+    # video, cac stage khac theo lo BATCH_COMMIT.
+    max_minutes: float = field(default_factory=lambda: _f("MAX_MINUTES", 0))
     limit: int = field(default_factory=lambda: _i("LIMIT", 0))          # 0 = khong gioi han
     copy_embedding: bool = field(default_factory=lambda: _b("COPY_EMBEDDING", True))
     max_side: int = field(default_factory=lambda: _i("MAX_SIDE", 1600))  # resize truoc infer
@@ -176,7 +186,11 @@ class Settings:
                 f"video   {vid}\n"
                 f"vdata   {deep}\n"
                 f"resource gpu={self.use_gpu} threads={self.onnx_threads} "
-                f"sleep={self.sleep_ms}ms batch={self.batch} limit={self.limit or '-'}")
+                f"sleep={self.sleep_ms}ms batch={self.batch} limit={self.limit or '-'}\n"
+                f"thoi gian "
+                + (f"tran {self.max_minutes:g} phut, tu dung sach roi exit 0"
+                   if self.max_minutes > 0
+                   else "khong dat tran (de k8s cat bang activeDeadlineSeconds)"))
 
 
 def load():

@@ -107,10 +107,18 @@ def main(argv=None):
         if any(x not in ("rematch", "smiles") for x in todo):
             s.require_media()
         media = MediaReader(s)
+
+        # Tu dat tran thoi gian TRUOC khi vao stage dau tien. Xem idx/control.py
+        # cho ly do day du; tom lai la de Job ket thuc bang exit 0 thay vi bi
+        # activeDeadlineSeconds cat, vi ban cat mat log va de lai dong fp_run mo.
+        if control.set_budget(s.max_minutes):
+            print(f"ngan sach thoi gian: {s.max_minutes:g} phut. Het gio thi dung "
+                  f"sach sau lan commit gan nhat va thoat voi ma 0.")
+
         t0 = time.time()
         for name in todo:
             if control.should_stop():
-                print("dung theo yeu cau")
+                print(f"dung truoc stage '{name}': {control.stop_reason()}")
                 break
             _head(name)
             if name == "assets":
@@ -128,7 +136,20 @@ def main(argv=None):
             elif name == "smiles":
                 stages.smiles(conn, s)
         print(f"\n{media.stats()}")
-        print(f"tong thoi gian {(time.time() - t0) / 60:.1f} phut\n")
+        print(f"tong thoi gian {(time.time() - t0) / 60:.1f} phut")
+        # Noi ro job ket thuc vi da xong hay vi het gio, va noi ro ma thoat la 0
+        # trong CA HAI truong hop: dung som la mot ket qua BINH THUONG voi mot job
+        # resumable, khong phai that bai. Doc log ma khong thay cau nay thi nguoi
+        # sau se tuong dem qua co su co.
+        if control.should_stop():
+            left = control.remaining_minutes()
+            print(f"KET THUC SOM: {control.stop_reason()}"
+                  + (f" (con {left:.1f} phut)" if left else "")
+                  + ". Tien do da commit, lan chay sau tiep tuc dung cho nay. "
+                    "Thoat voi ma 0 -> Job = Succeeded.")
+        else:
+            print("hoan tat toan bo stage duoc yeu cau")
+        print()
         _head("tinh trang")
         stages.stats(conn, s)
         return 0

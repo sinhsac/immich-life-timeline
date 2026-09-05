@@ -188,6 +188,32 @@ stage commits **per video**). If it dies halfway through, re-running picks up wh
 left off instead of starting over. On SIGTERM it shuts down cleanly after committing
 the batch in flight — safe when k8s evicts it.
 
+### Stopping on time, on purpose
+
+`MAX_MINUTES` makes the job stop itself cleanly and **exit 0** once its budget is
+spent. Nothing is lost, for the same reason a SIGTERM loses nothing.
+
+Set it **below** the Job's `activeDeadlineSeconds` — say 210 minutes against 225 —
+so the job always beats Kubernetes to the punch. That matters more than it looks,
+because letting the deadline fire is not equivalent:
+
+| | job stops itself | `activeDeadlineSeconds` fires |
+|---|---|---|
+| Job result | `Succeeded` | `Failed / DeadlineExceeded` |
+| ArgoCD | healthy | **Degraded every morning** |
+| `lastSuccessfulTime` | updated | never moves |
+| Pod, and its logs | kept | **deleted by the controller**, and `/var/log/pods` cleaned with it |
+| `fp_run` row | closed by `finally` | left open, so the UI shows a stage "running" with no pod |
+
+Kubernetes has no notion of "do not cut it while it is making progress": a Job's
+lifetime is bounded by `activeDeadlineSeconds` (wall clock), `backoffLimit`, and
+exiting 0 — none of which consult health or progress. A `livenessProbe` works in a
+Job pod but can only kill it *sooner*. So the only way to stop at a good moment is
+for the job to know the time itself, which is what this is.
+
+With it set, the deadline goes back to being what it should be: a safety net for a
+job that has genuinely hung.
+
 `clips` is the most expensive stage. Rough estimate on a 4-core CPU: each sampled
 frame costs about 60–120ms for detection + recognition, so a 1-minute video at
 `VIDEO_FPS=2` is 120 frames ≈ 10–15 seconds. 500 one-minute videos is roughly
